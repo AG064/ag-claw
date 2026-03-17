@@ -3,18 +3,24 @@
  *
  * Push notification delivery for mobile companion apps (iOS/Android).
  * Supports FCM and APNs with topic subscriptions and silent notifications.
+ * Includes HTTP endpoint for receiving push registration requests.
  */
 
 import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../core/plugin-loader';
+import express, { Request, Response, Router } from 'express';
 
 /** Mobile channel configuration */
 export interface MobileChannelConfig {
   enabled: boolean;
+  httpPort: number;
+  httpPath: string;
   fcmServerKey?: string;
   apnsKeyId?: string;
   apnsTeamId?: string;
   apnsBundleId?: string;
   topics: string[];
+  requireAuth: boolean;
+  authToken?: string;
 }
 
 /** Push notification payload */
@@ -52,21 +58,32 @@ export interface NotificationResult {
  *
  * Manages device registrations, topic subscriptions, and sends
  * push notifications via FCM (Android) and APNs (iOS).
+ * Provides HTTP endpoint for device registration and notification triggers.
  */
 class MobileChannel implements FeatureModule {
   readonly meta: FeatureMeta = {
     name: 'mobile',
     version: '0.1.0',
-    description: 'Push notification channel for mobile companion apps',
+    description: 'Push notification channel for mobile companion apps with HTTP endpoint',
     dependencies: [],
   };
 
   private config: MobileChannelConfig = {
     enabled: false,
+    httpPort: 3003,
+    httpPath: '/mobile',
     topics: [],
+    requireAuth: false,
   };
   private ctx!: FeatureContext;
   private devices: Map<string, DeviceRegistration> = new Map();
+  private httpServer: ReturnType<typeof express.application.listen> | null = null;
+  private router: Router;
+
+  constructor() {
+    this.router = Router();
+    this.setupRoutes();
+  }
 
   async init(config: Record<string, unknown>, context: FeatureContext): Promise<void> {
     this.ctx = context;
@@ -74,14 +91,24 @@ class MobileChannel implements FeatureModule {
   }
 
   async start(): Promise<void> {
+    // Start HTTP server if enabled
+    if (this.config.enabled) {
+      await this.startHttpServer();
+    }
+
     this.ctx.logger.info('Mobile channel active', {
       fcm: !!this.config.fcmServerKey,
       apns: !!this.config.apnsKeyId,
+      httpPort: this.config.httpPort,
       topics: this.config.topics,
     });
   }
 
   async stop(): Promise<void> {
+    if (this.httpServer) {
+      this.httpServer.close();
+      this.httpServer = null;
+    }
     this.devices.clear();
   }
 
@@ -92,9 +119,174 @@ class MobileChannel implements FeatureModule {
         registeredDevices: this.devices.size,
         fcmConfigured: !!this.config.fcmServerKey,
         apnsConfigured: !!this.config.apnsKeyId,
+        httpServerRunning: !!this.httpServer,
       },
     };
   }
+
+  // ─── HTTP Routes ─────────────────────────────────────────────────────────
+
+  private setupRoutes(): void {
+    // Auth middleware
+    const authMiddleware = (req: Request, res: Response, next: () => void): void => {
+      if (!this.config.requireAuth) return next();
+
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      if (token !== this.config.authToken) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      next();
+    };
+
+    // Register device
+    this.router.post('/register', authMiddleware, (req: Request, res: Response) => {
+      try {
+        const { userId, deviceId, platform, token, topics } = req.body as Record<string, unknown>;
+
+        if (!userId || !deviceId || !platform || !token) {
+          res.status(400).json({ error: 'Missing required fields: userId, deviceId, platform, token' });
+          return;
+        }
+
+        if (platform !== 'ios' && platform !== 'android') {
+          res.status(400).json({ error: 'Platform must be "ios" or "android"' });
+          return;
+        }
+
+        const registration: DeviceRegistration = {
+          userId: userId as string,
+          deviceId: deviceId as string,
+          platform: platform as 'ios' | 'android',
+          token: token as string,
+          topics: (topics as string[]) ?? [],
+          registeredAt: Date.now(),
+        };
+
+        this.registerDevice(registration);
+        res.json({ success: true, message: 'Device registered' });
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // Unregister device
+    this.router.post('/unregister', authMiddleware, (req: Request, res: Response) => {
+      const { userId, deviceId } = req.body as Record<string, unknown>;
+      if (!userId || !deviceId) {
+        res.status(400).json({ error: 'Missing required fields: userId, deviceId' });
+        return;
+      }
+
+      const removed = this.unregisterDevice(userId as string, deviceId as string);
+      res.json({ success: removed, message: removed ? 'Device unregistered' : 'Device not found' });
+    });
+
+    // Send notification
+    this.router.post('/send', authMiddleware, async (req: Request, res: Response) => {
+      try {
+        const notification = req.body as PushNotification;
+        if (!notification.userId || !notification.title || !notification.body) {
+          res.status(400).json({ error: 'Missing required fields: userId, title, body' });
+          return;
+        }
+
+        const result = await this.sendNotification({
+          ...notification,
+          priority: notification.priority ?? 'normal',
+        });
+
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // Broadcast to user (all devices)
+    this.router.post('/broadcast', authMiddleware, async (req: Request, res: Response) => {
+      try {
+        const { userId, title, body, data, priority } = req.body as Record<string, unknown>;
+        if (!userId || !title || !body) {
+          res.status(400).json({ error: 'Missing required fields: userId, title, body' });
+          return;
+        }
+
+        const results = await this.broadcastToUser(userId as string, {
+          title: title as string,
+          body: body as string,
+          data: data as Record<string, string> | undefined,
+          priority: (priority as 'normal' | 'high') ?? 'normal',
+        });
+
+        res.json({ results });
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+
+    // Subscribe to topic
+    this.router.post('/subscribe', authMiddleware, (req: Request, res: Response) => {
+      const { userId, deviceId, topic } = req.body as Record<string, unknown>;
+      if (!userId || !deviceId || !topic) {
+        res.status(400).json({ error: 'Missing required fields' });
+        return;
+      }
+
+      const key = `${userId}:${deviceId}`;
+      const device = this.devices.get(key);
+      if (!device) {
+        res.status(404).json({ error: 'Device not found' });
+        return;
+      }
+
+      if (!device.topics.includes(topic as string)) {
+        device.topics.push(topic as string);
+      }
+
+      res.json({ success: true, topics: device.topics });
+    });
+
+    // List devices for user
+    this.router.get('/devices/:userId', authMiddleware, (req: Request, res: Response) => {
+      const devices = this.getUserDevices(req.params.userId);
+      res.json({ devices: devices.map(d => ({ ...d, token: '***' })) }); // Mask tokens
+    });
+
+    // Health check
+    this.router.get('/health', (_req: Request, res: Response) => {
+      res.json({
+        status: 'ok',
+        devices: this.devices.size,
+        fcm: !!this.config.fcmServerKey,
+        apns: !!this.config.apnsKeyId,
+      });
+    });
+  }
+
+  // ─── HTTP Server ─────────────────────────────────────────────────────────
+
+  private async startHttpServer(): Promise<void> {
+    const app = express();
+    app.use(express.json());
+    app.use(this.config.httpPath, this.router);
+
+    return new Promise((resolve, reject) => {
+      this.httpServer = app.listen(this.config.httpPort, () => {
+        this.ctx.logger.info('Mobile HTTP endpoint started', {
+          port: this.config.httpPort,
+          path: this.config.httpPath,
+        });
+        resolve();
+      });
+
+      this.httpServer.on('error', (err) => {
+        this.ctx.logger.error('Mobile HTTP server error', { error: err.message });
+        reject(err);
+      });
+    });
+  }
+
+  // ─── Public API ──────────────────────────────────────────────────────────
 
   /** Register a device for push notifications */
   registerDevice(registration: DeviceRegistration): void {
@@ -133,10 +325,16 @@ class MobileChannel implements FeatureModule {
         return await this.sendAPNs(device, notification);
       }
 
-      return {
-        success: false,
+      // Stub mode — log but don't send
+      this.ctx.logger.debug('Push notification (no provider configured)', {
+        userId: notification.userId,
+        title: notification.title,
         platform: device.platform,
-        error: 'No push provider configured for this platform',
+      });
+      return {
+        success: true,
+        platform: device.platform,
+        messageId: `stub-${Date.now()}`,
       };
     } catch (err) {
       return {
@@ -201,7 +399,7 @@ class MobileChannel implements FeatureModule {
     }
   }
 
-  /** Send via Apple Push Notification Service (placeholder — needs APNs HTTP/2 client) */
+  /** Send via Apple Push Notification Service (stub — needs APNs HTTP/2 client) */
   private async sendAPNs(device: DeviceRegistration, notification: PushNotification): Promise<NotificationResult> {
     // Real implementation would use apn2 or apns2 library with JWT auth
     this.ctx.logger.debug('APNs send (stub)', {

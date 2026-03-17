@@ -89,6 +89,31 @@ export const ConfigSchema = z.object({
     'evening-recap': FeatureToggleSchema.default({}),
     'smart-recommendations': FeatureToggleSchema.default({}),
     'group-management': FeatureToggleSchema.default({}),
+    budget: FeatureToggleSchema.extend({
+      monthlyLimit: z.number().default(1_000_000),
+      perAgentLimits: z.record(z.number()).default({}),
+      alertThreshold: z.number().default(80),
+      hardStop: z.boolean().default(true),
+      dbPath: z.string().default('./data/budget.db'),
+    }).default({}),
+    goals: FeatureToggleSchema.extend({
+      dbPath: z.string().default('./data/goals.db'),
+    }).default({}),
+    'task-checkout': FeatureToggleSchema.extend({
+      dbPath: z.string().default('./data/task-checkout.db'),
+      leaseDurationMs: z.number().default(1_800_000),
+      maxLeasesPerAgent: z.number().default(10),
+    }).default({}),
+    'company-templates': FeatureToggleSchema.extend({
+      templatesPath: z.string().default('./data/templates'),
+    }).default({}),
+    governance: FeatureToggleSchema.extend({
+      dbPath: z.string().default('./data/governance.db'),
+      autoApproveRisk: z.enum(['none', 'low', 'medium']).default('low'),
+      ticketExpiryMs: z.number().default(86_400_000),
+      requiredApprovers: z.number().default(1),
+      approvers: z.array(z.string()).default([]),
+    }).default({}),
   }).default({}),
   memory: MemoryConfigSchema.default({}),
   security: SecurityConfigSchema.default({}),
@@ -103,6 +128,10 @@ export const ConfigSchema = z.object({
     mobile: z.object({
       enabled: z.boolean().default(false),
       fcmKey: z.string().optional(),
+      httpPort: z.number().default(3003),
+      httpPath: z.string().default('/mobile'),
+      requireAuth: z.boolean().default(false),
+      authToken: z.string().optional(),
     }).default({}),
   }).default({}),
   logging: z.object({
