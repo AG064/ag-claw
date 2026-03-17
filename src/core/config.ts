@@ -1,0 +1,238 @@
+/**
+ * AG-Claw Configuration Loader
+ *
+ * Loads and validates configuration from YAML files with environment variable overrides.
+ * Supports hot-reloading via chokidar file watcher.
+ */
+
+import { readFileSync, existsSync } from 'fs';
+import { parse } from 'yaml';
+import { resolve } from 'path';
+import { z } from 'zod';
+import { watch } from 'chokidar';
+
+/** Server configuration schema */
+const ServerConfigSchema = z.object({
+  port: z.number().int().min(1).max(65535).default(3000),
+  host: z.string().default('0.0.0.0'),
+  cors: z.object({
+    enabled: z.boolean().default(true),
+    origins: z.array(z.string()).default(['*']),
+  }).default({}),
+  rateLimit: z.object({
+    enabled: z.boolean().default(true),
+    windowMs: z.number().int().default(60000),
+    maxRequests: z.number().int().default(100),
+  }).default({}),
+});
+
+/** Feature toggle schema */
+const FeatureToggleSchema = z.object({
+  enabled: z.boolean().default(false),
+});
+
+/** Voice feature config */
+const VoiceConfigSchema = FeatureToggleSchema.extend({
+  provider: z.enum(['elevenlabs', 'openai', 'local']).default('elevenlabs'),
+  voice: z.string().default('default'),
+  model: z.string().default('eleven_multilingual_v2'),
+  sttProvider: z.enum(['whisper', 'google', 'local']).default('whisper'),
+  wakeWord: z.string().optional(),
+});
+
+/** Webchat feature config */
+const WebchatConfigSchema = FeatureToggleSchema.extend({
+  port: z.number().int().default(3001),
+  maxConnections: z.number().int().default(1000),
+  messageHistory: z.number().int().default(100),
+});
+
+/** Knowledge Graph config */
+const KnowledgeGraphConfigSchema = FeatureToggleSchema.extend({
+  backend: z.enum(['sqlite', 'neo4j', 'memory']).default('sqlite'),
+  path: z.string().default('./data/knowledge.db'),
+});
+
+/** Memory config */
+const MemoryConfigSchema = z.object({
+  primary: z.enum(['sqlite', 'supabase', 'markdown']).default('sqlite'),
+  path: z.string().default('./data/memory.db'),
+  supabaseUrl: z.string().optional(),
+  supabaseKey: z.string().optional(),
+  selfEvolving: z.boolean().default(false),
+  compressionThreshold: z.number().int().default(10000),
+});
+
+/** Security config */
+const SecurityConfigSchema = z.object({
+  policy: z.string().default('config/security-policy.yaml'),
+  secrets: z.enum(['encrypted', 'env', 'file']).default('encrypted'),
+  auditLog: z.boolean().default(true),
+  allowlistMode: z.enum(['strict', 'permissive']).default('permissive'),
+});
+
+/** Root configuration schema */
+export const ConfigSchema = z.object({
+  server: ServerConfigSchema.default({}),
+  features: z.object({
+    webchat: WebchatConfigSchema.default({}),
+    voice: VoiceConfigSchema.default({}),
+    'knowledge-graph': KnowledgeGraphConfigSchema.default({}),
+    'multimodal-memory': FeatureToggleSchema.default({}),
+    'browser-automation': FeatureToggleSchema.default({}),
+    webhooks: FeatureToggleSchema.default({}),
+    'mesh-workflows': FeatureToggleSchema.default({}),
+    'live-canvas': FeatureToggleSchema.default({}),
+    'container-sandbox': FeatureToggleSchema.default({}),
+    'air-gapped': FeatureToggleSchema.default({}),
+    'morning-briefing': FeatureToggleSchema.default({}),
+    'evening-recap': FeatureToggleSchema.default({}),
+    'smart-recommendations': FeatureToggleSchema.default({}),
+    'group-management': FeatureToggleSchema.default({}),
+  }).default({}),
+  memory: MemoryConfigSchema.default({}),
+  security: SecurityConfigSchema.default({}),
+  channels: z.object({
+    telegram: z.object({
+      enabled: z.boolean().default(true),
+      token: z.string().optional(),
+    }).default({}),
+    webchat: z.object({
+      enabled: z.boolean().default(true),
+    }).default({}),
+    mobile: z.object({
+      enabled: z.boolean().default(false),
+      fcmKey: z.string().optional(),
+    }).default({}),
+  }).default({}),
+  logging: z.object({
+    level: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+    format: z.enum(['json', 'pretty']).default('pretty'),
+    file: z.string().optional(),
+  }).default({}),
+});
+
+export type AGClawConfig = z.infer<typeof ConfigSchema>;
+
+/** Configuration manager with hot-reload support */
+export class ConfigManager {
+  private config: AGClawConfig;
+  private configPath: string;
+  private watcher: ReturnType<typeof watch> | null = null;
+  private listeners: Set<(config: AGClawConfig) => void> = new Set();
+
+  constructor(configPath?: string) {
+    this.configPath = configPath ?? resolve(process.cwd(), 'config/default.yaml');
+    this.config = this.loadConfig();
+  }
+
+  /** Load and validate configuration from YAML file */
+  private loadConfig(): AGClawConfig {
+    let fileConfig: Record<string, unknown> = {};
+
+    if (existsSync(this.configPath)) {
+      const raw = readFileSync(this.configPath, 'utf-8');
+      fileConfig = parse(raw) ?? {};
+    }
+
+    // Environment variable overrides
+    const envOverrides = this.loadEnvOverrides();
+    const merged = this.deepMerge(fileConfig, envOverrides);
+
+    const result = ConfigSchema.safeParse(merged);
+    if (!result.success) {
+      console.error('Configuration validation failed:', result.error.format());
+      process.exit(1);
+    }
+
+    return result.data;
+  }
+
+  /** Load configuration overrides from environment variables */
+  private loadEnvOverrides(): Record<string, unknown> {
+    const overrides: Record<string, unknown> = {};
+
+    if (process.env.AGCLAW_PORT) {
+      overrides.server = { port: parseInt(process.env.AGCLAW_PORT, 10) };
+    }
+    if (process.env.AGCLAW_LOG_LEVEL) {
+      overrides.logging = { level: process.env.AGCLAW_LOG_LEVEL };
+    }
+    if (process.env.AGCLAW_TELEGRAM_TOKEN) {
+      overrides.channels = { telegram: { token: process.env.AGCLAW_TELEGRAM_TOKEN } };
+    }
+    if (process.env.AGCLAW_SUPABASE_URL) {
+      overrides.memory = { supabaseUrl: process.env.AGCLAW_SUPABASE_URL };
+    }
+    if (process.env.AGCLAW_SUPABASE_KEY) {
+      overrides.memory = { ...((overrides.memory as object) ?? {}), supabaseKey: process.env.AGCLAW_SUPABASE_KEY };
+    }
+
+    return overrides;
+  }
+
+  /** Deep merge two objects */
+  private deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
+    const result = { ...target };
+    for (const key of Object.keys(source)) {
+      if (source[key] instanceof Object && key in target && target[key] instanceof Object) {
+        result[key] = this.deepMerge(target[key] as Record<string, unknown>, source[key] as Record<string, unknown>);
+      } else {
+        result[key] = source[key];
+      }
+    }
+    return result;
+  }
+
+  /** Get current configuration */
+  get(): AGClawConfig {
+    return this.config;
+  }
+
+  /** Get a specific config section */
+  getSection<K extends keyof AGClawConfig>(section: K): AGClawConfig[K] {
+    return this.config[section];
+  }
+
+  /** Check if a feature is enabled */
+  isFeatureEnabled(feature: keyof AGClawConfig['features']): boolean {
+    return this.config.features[feature]?.enabled ?? false;
+  }
+
+  /** Enable hot-reload watching */
+  enableHotReload(): void {
+    if (this.watcher) return;
+
+    this.watcher = watch(this.configPath, { ignoreInitial: true });
+    this.watcher.on('change', () => {
+      console.log(`[Config] Reloading ${this.configPath}`);
+      this.config = this.loadConfig();
+      for (const listener of this.listeners) {
+        listener(this.config);
+      }
+    });
+  }
+
+  /** Register a listener for config changes */
+  onChange(listener: (config: AGClawConfig) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /** Stop watching for changes */
+  dispose(): void {
+    this.watcher?.close();
+    this.watcher = null;
+  }
+}
+
+// Singleton instance
+let instance: ConfigManager | null = null;
+
+/** Get or create the global config manager */
+export function getConfig(configPath?: string): ConfigManager {
+  if (!instance) {
+    instance = new ConfigManager(configPath);
+  }
+  return instance;
+}
