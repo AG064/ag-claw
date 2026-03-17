@@ -17,6 +17,8 @@ import { PluginLoader } from './core/plugin-loader';
 import {
   LLMProvider, Message, ToolDefinition, LLMResponse, createLLMProvider,
 } from './core/llm-provider';
+import { getSemanticMemory, SemanticMemory } from './memory/semantic';
+import { getMemoryGraph, MemoryGraph } from './memory/graph';
 
 // ─── Tool Interface ───────────────────────────────────────────────────────────
 
@@ -325,6 +327,8 @@ class AGClaw {
   private agent!: Agent;
   private llmProvider!: LLMProvider;
   private shuttingDown = false;
+  private semanticMemory!: SemanticMemory;
+  private memoryGraph!: MemoryGraph;
 
   constructor() {
     const configManager = getConfig();
@@ -334,6 +338,11 @@ class AGClaw {
       format: this.config.logging.format as 'json' | 'pretty',
     });
     this.pluginLoader = new PluginLoader(this.config);
+
+    // Initialize OMEGA Memory subsystem
+    this.semanticMemory = getSemanticMemory();
+    this.memoryGraph = getMemoryGraph();
+    this.logger.info('OMEGA Memory initialized (semantic + graph)');
   }
 
   /** Get the agent instance (for channels to use) */
@@ -344,6 +353,16 @@ class AGClaw {
   /** Get the config */
   getConfig(): AGClawConfig {
     return this.config;
+  }
+
+  /** Get the semantic memory instance */
+  getSemanticMemory(): SemanticMemory {
+    return this.semanticMemory;
+  }
+
+  /** Get the memory graph instance */
+  getMemoryGraph(): MemoryGraph {
+    return this.memoryGraph;
   }
 
   /** Start the AG-Claw framework */
@@ -390,9 +409,16 @@ class AGClaw {
       this.agent.registerTool(tool);
     }
 
+    // Register OMEGA Memory tools
+    this.registerMemoryTools();
+
     // Load and enable features
     await this.pluginLoader.loadAll();
     await this.pluginLoader.enableAll();
+
+    // Emit startup hook for OMEGA Memory features (auto-capture, consolidation, checkpoint)
+    await this.pluginLoader['emitHook']?.('system:start', { timestamp: Date.now() }) ??
+      this.logger.debug('Hook emission not available on plugin loader');
 
     // Start channels
     await this.startChannels();
@@ -474,6 +500,27 @@ class AGClaw {
           chatId: ctx.chat?.id,
           length: text.length,
         });
+
+        // Auto-capture: analyze incoming message for decisions/lessons/errors
+        try {
+          const autoCapture = (await import('./features/auto-capture')).default;
+          const captures = autoCapture.detectCaptures(text, `telegram:${ctx.from?.id}`);
+          if (captures.length > 0) {
+            this.logger.info('Auto-captured items', { count: captures.length, types: captures.map(c => c.type) });
+            for (const capture of captures) {
+              await this.semanticMemory.store(capture.type, capture.content, {
+                source: 'telegram',
+                userId: ctx.from?.id,
+                confidence: capture.confidence,
+              });
+            }
+          }
+        } catch (err) {
+          this.logger.debug('Auto-capture skipped', { error: err instanceof Error ? err.message : String(err) });
+        }
+
+        // Emit message received hook
+        await this.pluginLoader['emitHook']?.('message:received', { text, userId: ctx.from?.id, chatId: ctx.chat?.id });
 
         // Show typing indicator
         await ctx.replyWithChatAction('typing');
@@ -611,6 +658,74 @@ class AGClaw {
     }, 60_000); // Every minute
   }
 
+  /** Register OMEGA Memory tools for the agent */
+  private registerMemoryTools(): void {
+    const self = this;
+
+    this.agent.registerTool({
+      name: 'memory_search',
+      description: 'Search semantic memory for relevant past conversations, decisions, and lessons.',
+      parameters: {
+        query: { type: 'string', description: 'Search query', required: true },
+        limit: { type: 'number', description: 'Max results (default 5)' },
+      },
+      execute: async (params) => {
+        const query = params.query as string;
+        const limit = (params.limit as number) ?? 5;
+        const results = await self.semanticMemory.search(query, limit);
+        if (results.length === 0) return 'No memories found matching your query.';
+        return results.map(r =>
+          `[${r.type}] ${r.content.slice(0, 200)} (accessed ${r.access_count}x)`
+        ).join('\n');
+      },
+    });
+
+    this.agent.registerTool({
+      name: 'memory_store',
+      description: 'Store a new memory entry (decision, lesson, error, preference, or general note).',
+      parameters: {
+        type: { type: 'string', description: 'Type: decision, lesson, error, preference, general', required: true },
+        content: { type: 'string', description: 'Content to remember', required: true },
+      },
+      execute: async (params) => {
+        const type = params.type as string;
+        const content = params.content as string;
+        const id = await self.semanticMemory.store(type, content, { source: 'agent_tool' });
+        return `Memory stored: ${id} (${type})`;
+      },
+    });
+
+    this.agent.registerTool({
+      name: 'memory_checkpoint',
+      description: 'Save a checkpoint for a task to resume later.',
+      parameters: {
+        taskId: { type: 'string', description: 'Unique task identifier', required: true },
+        state: { type: 'string', description: 'JSON state to save', required: true },
+      },
+      execute: async (params) => {
+        const taskId = params.taskId as string;
+        const state = JSON.parse(params.state as string);
+        await self.semanticMemory.checkpoint(taskId, state);
+        return `Checkpoint saved for task: ${taskId}`;
+      },
+    });
+
+    this.agent.registerTool({
+      name: 'memory_resume',
+      description: 'Resume a previously checkpointed task.',
+      parameters: {
+        taskId: { type: 'string', description: 'Task identifier to resume', required: true },
+      },
+      execute: async (params) => {
+        const taskId = params.taskId as string;
+        const state = await self.semanticMemory.resume(taskId);
+        if (!state) return `No checkpoint found for task: ${taskId}`;
+        return `Resumed task ${taskId}:\n${JSON.stringify(state, null, 2)}`;
+      },
+    });
+
+    this.logger.info('OMEGA Memory tools registered', { tools: ['memory_search', 'memory_store', 'memory_checkpoint', 'memory_resume'] });
+  }
   /** Register signal handlers for graceful shutdown */
   private registerShutdownHandlers(): void {
     const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGUSR2'];
@@ -653,6 +768,10 @@ class AGClaw {
         });
       }
     }
+
+    // Close OMEGA Memory
+    this.semanticMemory.close();
+    this.logger.info('OMEGA Memory closed');
 
     this.logger.info('AG-Claw shutdown complete');
   }
