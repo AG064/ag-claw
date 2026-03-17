@@ -5,7 +5,7 @@
  * to suggest content, actions, and optimizations.
  */
 
-import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../core/plugin-loader';
+import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../../core/plugin-loader';
 
 /** Smart recommendations configuration */
 export interface SmartRecommendationsConfig {

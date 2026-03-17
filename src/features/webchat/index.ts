@@ -7,7 +7,7 @@
 
 import { Server as HttpServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
-import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../core/plugin-loader';
+import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../../core/plugin-loader';
 
 /** Webchat configuration */
 export interface WebchatConfig {

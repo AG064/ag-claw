@@ -5,7 +5,7 @@
  * retry logic, and event routing.
  */
 
-import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../core/plugin-loader';
+import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../../core/plugin-loader';
 import { createHmac } from 'crypto';
 
 /** Webhook configuration */

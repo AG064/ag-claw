@@ -6,7 +6,7 @@
  */
 
 import Database from 'better-sqlite3';
-import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../core/plugin-loader';
+import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../../core/plugin-loader';
 
 /** Knowledge Graph configuration */
 export interface KnowledgeGraphConfig {

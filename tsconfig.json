@@ -15,9 +15,10 @@
     "sourceMap": true,
     "moduleResolution": "node",
     "allowSyntheticDefaultImports": true,
-    "noUncheckedIndexedAccess": true,
+    "noUncheckedIndexedAccess": false,
     "exactOptionalPropertyTypes": false,
     "baseUrl": ".",
+    "types": ["node"],
     "paths": {
       "@core/*": ["src/core/*"],
       "@features/*": ["src/features/*"],

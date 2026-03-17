@@ -5,7 +5,7 @@
  * Supports shapes, freehand drawing, text, and image overlays.
  */
 
-import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../core/plugin-loader';
+import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../../core/plugin-loader';
 
 /** Live Canvas configuration */
 export interface LiveCanvasConfig {

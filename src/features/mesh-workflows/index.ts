@@ -5,7 +5,7 @@
  * parallel execution, and error handling.
  */
 
-import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../core/plugin-loader';
+import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../../core/plugin-loader';
 
 /** Mesh workflow configuration */
 export interface MeshWorkflowsConfig {

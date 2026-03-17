@@ -5,7 +5,7 @@
  * Uses Puppeteer-compatible API with sandboxed execution.
  */
 
-import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../core/plugin-loader';
+import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../../core/plugin-loader';
 
 /** Browser automation configuration */
 export interface BrowserAutomationConfig {

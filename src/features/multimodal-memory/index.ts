@@ -5,7 +5,7 @@
  * Supports semantic search and temporal queries.
  */
 
-import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../core/plugin-loader';
+import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../../core/plugin-loader';
 
 /** Multimodal memory configuration */
 export interface MultimodalMemoryConfig {

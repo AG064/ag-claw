@@ -6,27 +6,344 @@
  * - Initializes logging
  * - Starts the plugin loader
  * - Enables configured features
+ * - Implements Agentic Tool Loop
  * - Sets up graceful shutdown
  */
 
+import 'dotenv/config';
 import { getConfig, AGClawConfig } from './core/config';
 import { createLogger, Logger } from './core/logger';
 import { PluginLoader } from './core/plugin-loader';
+import {
+  LLMProvider, Message, ToolDefinition, LLMResponse, createLLMProvider,
+} from './core/llm-provider';
+
+// ─── Tool Interface ───────────────────────────────────────────────────────────
+
+export interface Tool {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  execute: (params: Record<string, unknown>) => Promise<string>;
+}
+
+// ─── Agent Core ───────────────────────────────────────────────────────────────
+
+export class Agent {
+  private tools: Map<string, Tool> = new Map();
+  private model: LLMProvider;
+  private logger: Logger;
+  private maxIterations = 10;
+  private systemPrompt: string;
+
+  constructor(model: LLMProvider, systemPrompt?: string) {
+    this.model = model;
+    this.logger = createLogger().child({ feature: 'agent' });
+    this.systemPrompt = systemPrompt ?? `You are AG-Claw, a helpful AI assistant. You have access to tools that you can use to help answer questions and complete tasks. When you need to use a tool, call it. When you have enough information, respond directly to the user.`;
+  }
+
+  registerTool(tool: Tool): void {
+    this.tools.set(tool.name, tool);
+    this.logger.debug(`Tool registered: ${tool.name}`);
+  }
+
+  unregisterTool(name: string): void {
+    this.tools.delete(name);
+  }
+
+  getToolNames(): string[] {
+    return Array.from(this.tools.keys());
+  }
+
+  async handleMessage(message: string, conversationHistory: Message[] = []): Promise<string> {
+    this.logger.info('Processing message', { length: message.length });
+
+    // Build initial messages array
+    const messages: Message[] = [
+      { role: 'system', content: this.systemPrompt },
+      ...conversationHistory,
+      { role: 'user', content: message },
+    ];
+
+    // Convert tools to LLM format
+    const toolDefs: ToolDefinition[] = Array.from(this.tools.values()).map(t => ({
+      type: 'function' as const,
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: {
+          type: 'object',
+          properties: t.parameters,
+          required: Object.keys(t.parameters).filter(k =>
+            (t.parameters[k] as Record<string, unknown>)?.required === true
+          ),
+        },
+      },
+    }));
+
+    let iterations = 0;
+
+    while (iterations < this.maxIterations) {
+      iterations++;
+      this.logger.debug(`Agent iteration ${iterations}/${this.maxIterations}`);
+
+      // Send to LLM
+      let response: LLMResponse;
+      try {
+        response = await this.model.chat(messages, toolDefs.length > 0 ? toolDefs : undefined);
+      } catch (err) {
+        this.logger.error('LLM call failed', { error: err instanceof Error ? err.message : String(err) });
+        throw err;
+      }
+
+      // Track usage
+      this.logger.debug('LLM usage', response.usage);
+
+      // If we have tool calls, execute them
+      if (response.toolCalls && response.toolCalls.length > 0) {
+        // Add assistant message with tool calls
+        const assistantMsg: Message = {
+          role: 'assistant',
+          content: response.content ?? '',
+          tool_calls: response.toolCalls.map(tc => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.arguments),
+            },
+          })),
+        };
+        messages.push(assistantMsg);
+
+        // Execute each tool call
+        for (const toolCall of response.toolCalls) {
+          const tool = this.tools.get(toolCall.name);
+          if (!tool) {
+            this.logger.warn(`Unknown tool called: ${toolCall.name}`);
+            messages.push({
+              role: 'tool',
+              content: `Error: Tool '${toolCall.name}' not found. Available tools: ${Array.from(this.tools.keys()).join(', ')}`,
+              tool_call_id: toolCall.id,
+            });
+            continue;
+          }
+
+          this.logger.info(`Executing tool: ${toolCall.name}`, { args: toolCall.arguments });
+
+          try {
+            const result = await tool.execute(toolCall.arguments);
+            messages.push({
+              role: 'tool',
+              content: result,
+              tool_call_id: toolCall.id,
+            });
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            this.logger.error(`Tool execution failed: ${toolCall.name}`, { error: errMsg });
+            messages.push({
+              role: 'tool',
+              content: `Error executing tool: ${errMsg}`,
+              tool_call_id: toolCall.id,
+            });
+          }
+        }
+
+        // Continue loop — send results back to LLM
+        continue;
+      }
+
+      // No tool calls — we have a final response
+      if (response.content) {
+        this.logger.info('Agent response ready', { iterations, length: response.content.length });
+        return response.content;
+      }
+
+      // Empty response — shouldn't happen but handle it
+      this.logger.warn('Empty LLM response, retrying');
+      continue;
+    }
+
+    // Max iterations reached
+    this.logger.warn('Max agent iterations reached');
+    return 'I apologize, but I was unable to complete your request after multiple attempts. Please try rephrasing your question.';
+  }
+}
+
+// ─── Memory Backend Interface ─────────────────────────────────────────────────
+
+export interface MemoryBackend {
+  store(entry: MemoryEntry): Promise<void>;
+  search(query: string, limit?: number): Promise<MemoryEntry[]>;
+  getRecent(limit?: number): Promise<MemoryEntry[]>;
+  delete(id: string): Promise<boolean>;
+}
+
+export interface MemoryEntry {
+  id: string;
+  content: string;
+  createdAt: number;
+  accessedAt: number;
+  accessCount: number;
+  metadata?: Record<string, unknown>;
+}
+
+// ─── Built-in Tools ───────────────────────────────────────────────────────────
+
+function createBuiltinTools(): Tool[] {
+  return [
+    {
+      name: 'web_search',
+      description: 'Search the web for information. Returns search results with titles and snippets.',
+      parameters: {
+        query: { type: 'string', description: 'The search query', required: true },
+      },
+      execute: async (params) => {
+        const query = params.query as string;
+        if (!query) return 'Error: query parameter is required';
+
+        // Use DuckDuckGo instant answer API as a lightweight search
+        try {
+          const response = await fetch(
+            `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`
+          );
+          const data = await response.json() as Record<string, unknown>;
+          const abstract = data.Abstract as string;
+          const heading = data.Heading as string;
+          const related = (data.RelatedTopics as Array<{ Text: string }> ?? []).slice(0, 5).map(t => t.Text).join('\n');
+
+          if (abstract) {
+            return `Search result for "${query}":\n${heading ? heading + '\n' : ''}${abstract}`;
+          } else if (related) {
+            return `Search results for "${query}":\n${related}`;
+          } else {
+            return `No direct results for "${query}". Try a different search query.`;
+          }
+        } catch (err) {
+          return `Search failed: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    },
+    {
+      name: 'get_current_time',
+      description: 'Get the current date and time in ISO format.',
+      parameters: {},
+      execute: async () => {
+        return new Date().toISOString();
+      },
+    },
+    {
+      name: 'read_file',
+      description: 'Read the contents of a file. Only safe paths are allowed.',
+      parameters: {
+        path: { type: 'string', description: 'File path to read', required: true },
+      },
+      execute: async (params) => {
+        const { readFileSync, existsSync } = await import('fs');
+        const filePath = params.path as string;
+
+        if (!filePath) return 'Error: path parameter is required';
+
+        // Security: only allow reading within workspace
+        const safePath = filePath.replace(/\.\./g, '');
+        if (!existsSync(safePath)) {
+          return `Error: File not found: ${safePath}`;
+        }
+
+        try {
+          const content = readFileSync(safePath, 'utf-8');
+          return content.length > 5000
+            ? content.slice(0, 5000) + '\n... (truncated)'
+            : content;
+        } catch (err) {
+          return `Error reading file: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    },
+    {
+      name: 'write_file',
+      description: 'Write content to a file. Creates directories as needed.',
+      parameters: {
+        path: { type: 'string', description: 'File path to write', required: true },
+        content: { type: 'string', description: 'Content to write', required: true },
+      },
+      execute: async (params) => {
+        const { writeFileSync, mkdirSync } = await import('fs');
+        const { dirname } = await import('path');
+        const filePath = params.path as string;
+        const content = params.content as string;
+
+        if (!filePath || content === undefined) return 'Error: path and content parameters are required';
+
+        try {
+          mkdirSync(dirname(filePath), { recursive: true });
+          writeFileSync(filePath, content, 'utf-8');
+          return `File written successfully: ${filePath} (${content.length} chars)`;
+        } catch (err) {
+          return `Error writing file: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    },
+    {
+      name: 'run_command',
+      description: 'Execute a shell command. Returns stdout and stderr.',
+      parameters: {
+        command: { type: 'string', description: 'Shell command to execute', required: true },
+      },
+      execute: async (params) => {
+        const { execSync } = await import('child_process');
+        const cmd = params.command as string;
+
+        if (!cmd) return 'Error: command parameter is required';
+
+        // Block dangerous commands
+        const blocked = ['rm -rf /', 'mkfs', 'dd if=', ':(){ :|:& };:', 'chmod 777'];
+        if (blocked.some(b => cmd.includes(b))) {
+          return 'Error: This command is blocked for safety reasons.';
+        }
+
+        try {
+          const output = execSync(cmd, { timeout: 30000, encoding: 'utf-8', maxBuffer: 1024 * 1024 });
+          return output.length > 5000
+            ? output.slice(0, 5000) + '\n... (truncated)'
+            : output || '(no output)';
+        } catch (err: unknown) {
+          const e = err as { message: string; stderr?: string };
+          return `Command failed: ${e.message}\n${e.stderr ?? ''}`;
+        }
+      },
+    },
+  ];
+}
+
+// ─── AG-Claw Main Application ────────────────────────────────────────────────
 
 class AGClaw {
   private config: AGClawConfig;
   private logger: Logger;
   private pluginLoader: PluginLoader;
+  private agent!: Agent;
+  private llmProvider!: LLMProvider;
   private shuttingDown = false;
 
   constructor() {
     const configManager = getConfig();
     this.config = configManager.get();
     this.logger = createLogger({
-      level: this.config.logging.level,
-      format: this.config.logging.format,
+      level: this.config.logging.level as 'debug' | 'info' | 'warn' | 'error',
+      format: this.config.logging.format as 'json' | 'pretty',
     });
     this.pluginLoader = new PluginLoader(this.config);
+  }
+
+  /** Get the agent instance (for channels to use) */
+  getAgent(): Agent {
+    return this.agent;
+  }
+
+  /** Get the config */
+  getConfig(): AGClawConfig {
+    return this.config;
   }
 
   /** Start the AG-Claw framework */
@@ -40,9 +357,45 @@ class AGClaw {
     // Register shutdown handlers
     this.registerShutdownHandlers();
 
+    // Initialize LLM provider
+    try {
+      const modelConfig = (this.config as Record<string, unknown>).model as Record<string, unknown> | undefined;
+      this.llmProvider = createLLMProvider({
+        provider: modelConfig?.provider as string | undefined,
+        model: modelConfig?.defaultModel as string | undefined,
+        fallbackModels: modelConfig?.fallbackModel ? [modelConfig.fallbackModel as string] : [],
+      });
+      this.logger.info(`LLM provider initialized: ${this.llmProvider.name}`);
+    } catch (err) {
+      this.logger.warn('LLM provider not configured, agent will have limited capabilities', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Create a stub provider for testing
+      this.llmProvider = {
+        name: 'stub',
+        async chat(_messages: Message[]): Promise<LLMResponse> {
+          return {
+            content: 'I am running in stub mode. Please configure OPENROUTER_API_KEY or ANTHROPIC_API_KEY to enable full capabilities.',
+            usage: { prompt: 0, completion: 0 },
+          };
+        },
+      };
+    }
+
+    // Initialize Agent
+    this.agent = new Agent(this.llmProvider);
+
+    // Register built-in tools
+    for (const tool of createBuiltinTools()) {
+      this.agent.registerTool(tool);
+    }
+
     // Load and enable features
     await this.pluginLoader.loadAll();
     await this.pluginLoader.enableAll();
+
+    // Start channels
+    await this.startChannels();
 
     const features = this.pluginLoader.listFeatures();
     const activeCount = features.filter(f => f.state === 'active').length;
@@ -50,11 +403,198 @@ class AGClaw {
 
     this.logger.info(`AG-Claw started successfully`, {
       features: `${activeCount}/${totalCount} active`,
+      tools: this.agent.getToolNames().length,
       port: this.config.server.port,
     });
 
     // Start health check interval
     this.startHealthChecks();
+  }
+
+  /** Start configured channels (Telegram, Webchat) */
+  private async startChannels(): Promise<void> {
+    const channels = this.config.channels as Record<string, Record<string, unknown>> | undefined;
+
+    // Start Telegram if configured
+    if (channels?.telegram?.enabled !== false) {
+      const token = (channels?.telegram?.token as string) ?? process.env.AGCLAW_TELEGRAM_TOKEN ?? process.env.TELEGRAM_BOT_TOKEN;
+      if (token) {
+        try {
+          await this.startTelegram(token, channels?.telegram);
+        } catch (err) {
+          this.logger.error('Failed to start Telegram channel', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      } else {
+        this.logger.info('Telegram channel enabled but no token provided (set AGCLAW_TELEGRAM_TOKEN or TELEGRAM_BOT_TOKEN)');
+      }
+    }
+
+    // Webchat could be started here too
+    if (channels?.webchat?.enabled) {
+      this.logger.info('Webchat channel enabled (not yet implemented in entry point)');
+    }
+  }
+
+  /** Start Telegram bot using grammY */
+  private async startTelegram(token: string, channelConfig?: Record<string, unknown>): Promise<void> {
+    try {
+      const { Bot } = await import('grammy');
+      const bot = new Bot(token);
+
+      const allowedUsers = (channelConfig?.allowedUsers as number[] | undefined) ?? [];
+      const allowedChats = (channelConfig?.allowedChats as number[] | undefined) ?? [];
+
+      // Check access
+      const isAllowed = (ctx: { from?: { id: number }; chat?: { id: number } }): boolean => {
+        if (allowedUsers.length === 0 && allowedChats.length === 0) return true;
+        const userId = ctx.from?.id;
+        const chatId = ctx.chat?.id;
+        if (userId && allowedUsers.includes(userId)) return true;
+        if (chatId && allowedChats.includes(chatId)) return true;
+        return false;
+      };
+
+      // Handle text messages
+      bot.on('message:text', async (ctx) => {
+        if (!isAllowed(ctx)) {
+          this.logger.warn('Unauthorized access attempt', {
+            userId: ctx.from?.id,
+            chatId: ctx.chat?.id,
+          });
+          return;
+        }
+
+        const text = ctx.message.text;
+        if (!text) return;
+
+        this.logger.info('Telegram message received', {
+          userId: ctx.from?.id,
+          chatId: ctx.chat?.id,
+          length: text.length,
+        });
+
+        // Show typing indicator
+        await ctx.replyWithChatAction('typing');
+
+        try {
+          const response = await this.agent.handleMessage(text);
+          await ctx.reply(response);
+        } catch (err) {
+          this.logger.error('Agent error', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          await ctx.reply('Sorry, I encountered an error processing your request. Please try again.');
+        }
+      });
+
+      // Handle voice messages
+      bot.on('message:voice', async (ctx) => {
+        if (!isAllowed(ctx)) return;
+
+        this.logger.info('Voice message received', {
+          userId: ctx.from?.id,
+          chatId: ctx.chat?.id,
+        });
+
+        try {
+          // Download voice file
+          const file = await ctx.getFile();
+          const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+
+          const response = await fetch(fileUrl);
+          const audioBuffer = Buffer.from(await response.arrayBuffer());
+
+          // Try to transcribe with Whisper if available
+          const openaiKey = process.env.OPENAI_API_KEY;
+          if (openaiKey) {
+            await ctx.replyWithChatAction('typing');
+
+            const formData = new FormData();
+            const blob = new Blob([audioBuffer], { type: 'audio/ogg' });
+            formData.append('file', blob, 'voice.ogg');
+            formData.append('model', 'whisper-1');
+
+            const transcribeResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${openaiKey}` },
+              body: formData,
+            });
+
+            if (transcribeResponse.ok) {
+              const { text } = await transcribeResponse.json() as { text: string };
+              this.logger.info('Voice transcribed', { text: text.slice(0, 100) });
+
+              const agentResponse = await this.agent.handleMessage(text);
+              await ctx.reply(`🎤 *Transcription:* ${text}\n\n${agentResponse}`, { parse_mode: 'Markdown' });
+            } else {
+              await ctx.reply('Sorry, I was unable to transcribe your voice message.');
+            }
+          } else {
+            await ctx.reply('I received your voice message, but voice transcription is not configured (OPENAI_API_KEY not set).');
+          }
+        } catch (err) {
+          this.logger.error('Voice processing error', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          await ctx.reply('Sorry, I had trouble processing your voice message.');
+        }
+      });
+
+      // Handle /start command
+      bot.command('start', async (ctx) => {
+        await ctx.reply(
+          '🤖 Welcome to AG-Claw!\n\n' +
+          'I am an AI assistant with tool-use capabilities. Send me a message and I will do my best to help.\n\n' +
+          `Available tools: ${this.agent.getToolNames().join(', ')}`
+        );
+      });
+
+      // Handle /help command
+      bot.command('help', async (ctx) => {
+        const tools = this.agent.getToolNames();
+        await ctx.reply(
+          '🤖 *AG-Claw Help*\n\n' +
+          'Just send me any message and I will respond.\n\n' +
+          '*Available tools:*\n' +
+          tools.map(t => `• /${t}`).join('\n') +
+          '\n\n*Commands:*\n' +
+          '/start - Welcome message\n' +
+          '/help - This help message\n' +
+          '/status - Bot status',
+          { parse_mode: 'Markdown' }
+        );
+      });
+
+      // Handle /status command
+      bot.command('status', async (ctx) => {
+        const features = this.pluginLoader.listFeatures();
+        const activeCount = features.filter(f => f.state === 'active').length;
+        await ctx.reply(
+          '📊 *AG-Claw Status*\n\n' +
+          `LLM: ${this.llmProvider.name}\n` +
+          `Tools: ${this.agent.getToolNames().length}\n` +
+          `Features: ${activeCount}/${features.length} active\n` +
+          `Uptime: ${Math.floor(process.uptime())}s`,
+          { parse_mode: 'Markdown' }
+        );
+      });
+
+      // Start bot
+      bot.start({
+        onStart: (info) => {
+          this.logger.info('Telegram bot started', { username: info.username });
+        },
+      });
+
+      this.logger.info('Telegram channel started', { username: 'starting...' });
+    } catch (err) {
+      this.logger.error('Failed to import grammY', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   }
 
   /** Periodic health checks for active features */
@@ -88,7 +628,6 @@ class AGClaw {
 
     process.on('uncaughtException', (err) => {
       this.logger.error('Uncaught exception', { error: err.message, stack: err.stack });
-      // Don't exit — log and continue
     });
 
     process.on('unhandledRejection', (reason) => {
@@ -117,6 +656,18 @@ class AGClaw {
 
     this.logger.info('AG-Claw shutdown complete');
   }
+}
+
+// ─── CLI Entry Point ──────────────────────────────────────────────────────────
+
+// Singleton instance for import by other modules
+let appInstance: AGClaw | null = null;
+
+export function getAGClaw(): AGClaw {
+  if (!appInstance) {
+    appInstance = new AGClaw();
+  }
+  return appInstance;
 }
 
 // Start if run directly
