@@ -7,7 +7,7 @@ WORKDIR /app
 
 # Install build dependencies
 COPY package.json package-lock.json* ./
-RUN npm ci --ignore-scripts
+RUN npm install --ignore-scripts
 
 # Copy source code
 COPY tsconfig.json ./

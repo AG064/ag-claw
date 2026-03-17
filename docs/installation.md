@@ -38,7 +38,7 @@ npm -v    # Should print 9.x.x or higher
 
 ## Quick Start
 
-The fastest way to get AG-Claw running:
+The fastest way to get running:
 
 ```bash
 # Download and run the installer
@@ -163,7 +163,7 @@ npm run dev
 
 ### YAML Configuration (`config/default.yaml`)
 
-The main configuration file controls all aspects of AG-Claw:
+The main configuration file controls everything:
 
 ```yaml
 # Server
@@ -262,7 +262,7 @@ newgrp docker
 
 ### SQLite Database Locked
 
-This can happen if multiple processes access the database. Stop all AG-Claw instances and restart:
+This happens when multiple processes try to access the database. Stop all instances and restart:
 
 ```bash
 pkill -f "node.*ag-claw"

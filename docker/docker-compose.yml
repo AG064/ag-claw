@@ -12,7 +12,7 @@ services:
     volumes:
       - ag-claw-data:/app/data
       - ag-claw-memory:/app/memory
-      - ./config:/app/config:ro
+      - ../config:/app/config:ro
     env_file:
       - ../.env
     environment:

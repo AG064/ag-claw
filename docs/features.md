@@ -11,7 +11,7 @@ Complete feature list with implementation status and configuration details.
 ### 1. Telegram Integration
 **Status:** ✅ Implemented
 
-Full Telegram bot integration with inline buttons, media support, and group management.
+Full Telegram bot with inline buttons, media support, and group management.
 
 **Configuration:**
 ```yaml
@@ -26,7 +26,7 @@ AGCLAW_TELEGRAM_TOKEN=your_bot_token
 ### 2. Webchat (WebSocket)
 **Status:** ✅ Implemented
 
-Real-time web chat interface via WebSocket connections with markdown rendering and message history.
+Real-time web chat over WebSocket, with markdown rendering and message history.
 
 **Configuration:**
 ```yaml
@@ -41,7 +41,7 @@ features:
 ### 3. Mobile Push Notifications
 **Status:** 🔧 In Development
 
-iOS and Android push notifications via Firebase Cloud Messaging. See [mobile/README.md](../mobile/README.md).
+iOS and Android push via Firebase Cloud Messaging. See [mobile/README.md](../mobile/README.md).
 
 **Configuration:**
 ```yaml
@@ -64,7 +64,7 @@ Slack app with interactive messages, slash commands, and event subscriptions.
 ### 6. Email (IMAP/SMTP)
 **Status:** 🔧 In Development
 
-Read and send emails via IMAP/SMTP. Scheduled inbox checking and smart replies.
+Read and send emails. Scheduled inbox checking and smart replies.
 
 ### 7. SMS Gateway
 **Status:** 🔧 In Development
@@ -83,7 +83,7 @@ WhatsApp integration via whatsapp-web.js or Meta Business API.
 ### 9. Text-to-Speech (TTS)
 **Status:** ✅ Implemented
 
-Convert text responses to natural speech using ElevenLabs, OpenAI, or local TTS engines.
+Convert text to speech using ElevenLabs, OpenAI, or local TTS engines.
 
 **Configuration:**
 ```yaml
@@ -98,7 +98,7 @@ features:
 ### 10. Speech-to-Text (STT)
 **Status:** ✅ Implemented
 
-Transcribe voice messages to text using Whisper, Google Speech, or local STT.
+Transcribe voice messages using Whisper, Google Speech, or local STT.
 
 **Configuration:**
 ```yaml
@@ -120,7 +120,7 @@ Clone a voice from audio samples for personalized TTS output.
 ### 13. Podcast Generation
 **Status:** 🔧 In Development
 
-Automatically generate podcast episodes from daily briefings and curated content.
+Generate podcast episodes from daily briefings and curated content.
 
 ---
 
@@ -129,7 +129,7 @@ Automatically generate podcast episodes from daily briefings and curated content
 ### 14. SQLite Memory
 **Status:** ✅ Implemented
 
-Local SQLite-based memory storage with full-text search and vector embeddings.
+Local SQLite storage with full-text search and vector embeddings.
 
 **Configuration:**
 ```yaml
@@ -141,7 +141,7 @@ memory:
 ### 15. Markdown Memory
 **Status:** ✅ Implemented
 
-Plain-text markdown file memory for human-readable, git-trackable storage.
+Plain-text markdown files, human-readable and git-trackable.
 
 **Configuration:**
 ```yaml
@@ -152,7 +152,7 @@ memory:
 ### 16. Supabase Memory
 **Status:** ✅ Implemented
 
-Cloud-hosted Supabase memory with pgvector for semantic search.
+Cloud-hosted Supabase with pgvector for semantic search.
 
 **Configuration:**
 ```yaml
@@ -165,7 +165,7 @@ memory:
 ### 17. Self-Evolving Memory
 **Status:** 🔧 In Development
 
-Memory that learns, consolidates, and evolves over time. Merges similar memories, discovers patterns, and prunes stale data.
+Memory that learns, consolidates, and evolves over time. Merges similar memories, discovers patterns, prunes stale data.
 
 **Configuration:**
 ```yaml
@@ -190,7 +190,7 @@ features:
 ### 19. Multimodal Memory
 **Status:** ✅ Implemented
 
-Store and retrieve images, audio, documents, and other media alongside text memories.
+Store and retrieve images, audio, documents alongside text memories.
 
 **Configuration:**
 ```yaml
@@ -202,7 +202,7 @@ features:
 ### 20. Semantic Search
 **Status:** 🔧 In Development
 
-Vector-based semantic search across all memories using embedding models.
+Vector-based semantic search across all memories.
 
 ### 21. Memory Compression
 **Status:** 🔧 In Development
@@ -258,7 +258,7 @@ features:
 ### 25. Container Sandbox
 **Status:** ✅ Implemented
 
-Execute untrusted code in isolated Docker containers with resource limits.
+Run untrusted code in isolated Docker containers with resource limits.
 
 **Configuration:**
 ```yaml
@@ -294,7 +294,7 @@ Schedule tasks using cron expressions with timezone support.
 ### 28. API Gateway
 **Status:** 🔧 In Development
 
-Expose AG-Claw features as REST API endpoints for external consumption.
+Expose AG-Claw features as REST API endpoints.
 
 ### 29. File Watcher
 **Status:** 🔧 In Development

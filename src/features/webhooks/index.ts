@@ -106,9 +106,7 @@ class WebhooksFeature implements FeatureModule {
   verifySignature(payload: string, signature: string, secret: string): boolean {
     const expected = createHmac('sha256', secret).update(payload).digest('hex');
     const provided = signature.replace('sha256=', '');
-    return createHmac('sha256', secret).update(payload).digest('hex') ===
-      createHmac('sha256', secret).update(payload).digest('hex') &&
-      expected.length === provided.length;
+    return expected === provided;
   }
 
   /** Process an incoming webhook event */

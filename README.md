@@ -2,7 +2,7 @@
 
 **Modular AI Agent Framework built on OpenClaw**
 
-AG-Claw extends [OpenClaw](https://github.com/nickarora/openclaw) with a modular feature system, security layer, and multi-channel support. Built for developers who want a powerful, self-hosted AI agent that can be customized feature-by-feature.
+AG-Claw is what happens when you take [OpenClaw](https://github.com/nickarora/openclaw) and decide it needs a plugin system, a real security layer, and support for more than just Telegram. You get a self-hosted AI agent that you can actually customize. Feature by feature, on your terms.
 
 Based on OpenClaw (MIT License).
 
@@ -136,7 +136,7 @@ Based on OpenClaw (MIT License).
 | 54 | Mobile Companion App | 🔧 In Development |
 | 55 | Plugin Marketplace | 🔧 In Development |
 
-**Total: 55 features (15 implemented, 40 in development)**
+**Total: 55 features. 22 done, 33 on the way.**
 
 ## Installation
 
@@ -159,7 +159,7 @@ docker compose -f docker/docker-compose.yml up -d
 
 ## Configuration
 
-All configuration lives in `config/default.yaml`:
+Everything lives in `config/default.yaml`:
 
 ```yaml
 server:

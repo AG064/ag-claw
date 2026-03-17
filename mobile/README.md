@@ -2,7 +2,7 @@
 
 ## Overview
 
-A cross-platform mobile companion app for AG-Claw, providing push notifications, camera access, GPS, screen recording, and seamless communication with the AG-Claw gateway.
+A cross-platform mobile app for AG-Claw, providing push notifications, camera access, GPS, screen recording, and direct communication with the AG-Claw gateway.
 
 **Status:** Planning / In Development
 
@@ -21,7 +21,7 @@ A cross-platform mobile companion app for AG-Claw, providing push notifications,
 
 **Decision: React Native + Expo**
 
-Rationale: TypeScript means code sharing with AG-Claw core (API types, WebSocket protocols, config schemas). Expo simplifies build/deploy and provides OTA updates without App Store review for JS changes.
+TypeScript means code sharing with AG-Claw core (API types, WebSocket protocols, config schemas). Expo simplifies build/deploy and provides OTA updates without App Store review for JS changes.
 
 ## Architecture
 
@@ -204,7 +204,7 @@ npx eas build --platform all
 
 ## API Contract
 
-The mobile app communicates with AG-Claw via:
+The mobile app talks to AG-Claw via:
 
 ### WebSocket (Primary)
 ```

@@ -74,7 +74,7 @@ How AG-Claw extends OpenClaw with a modular plugin system, multi-channel support
 
 ## How AG-Claw Extends OpenClaw
 
-[OpenClaw](https://github.com/nickarora/openclaw) provides the core AI agent runtime: model communication, session management, and tool integration. AG-Claw builds on top of this foundation:
+[OpenClaw](https://github.com/nickarora/openclaw) handles the core AI agent runtime: model communication, session management, and tool integration. AG-Claw builds on top of that.
 
 | Layer | OpenClaw | AG-Claw Extension |
 |---|---|---|
@@ -86,7 +86,7 @@ How AG-Claw extends OpenClaw with a modular plugin system, multi-channel support
 | **Security** | Basic allowlist | Full policy engine, encrypted secrets, audit logging |
 | **Deployment** | Manual | Docker, install script, auto-update |
 
-AG-Claw does not fork OpenClaw. It wraps and extends it as a dependency, preserving the ability to update the underlying runtime.
+AG-Claw does not fork OpenClaw. It wraps and extends it as a dependency, so you can still update the underlying runtime.
 
 ---
 
@@ -109,17 +109,17 @@ interface FeatureModule {
 ### Lifecycle
 
 ```
-unloaded → loading → active → disabled
-                 ↘ error
+unloaded -> loading -> active -> disabled
+                 \-> error
 ```
 
-1. **Scan** — `PluginLoader` scans `src/features/` directory for `index.ts` files
-2. **Register** — Each feature module is registered with its metadata
-3. **Resolve** — Dependencies are resolved via topological sort (circular deps detected)
-4. **Init** — Features are initialized with their YAML config and a shared context
-5. **Start** — Feature's `start()` hook is called
-6. **Health** — Periodic health checks every 60 seconds
-7. **Stop** — Graceful shutdown calls `stop()` in reverse order
+1. **Scan** - `PluginLoader` scans `src/features/` for `index.ts` files
+2. **Register** - Each feature module is registered with its metadata
+3. **Resolve** - Dependencies are resolved via topological sort (circular deps detected)
+4. **Init** - Features are initialized with their YAML config and a shared context
+5. **Start** - Feature's `start()` hook is called
+6. **Health** - Periodic health checks every 60 seconds
+7. **Stop** - Graceful shutdown calls `stop()` in reverse order
 
 ### Shared Context
 
@@ -131,10 +131,9 @@ interface FeatureContext {
   config: AGClawConfig;                        // Full config object
   registerHook(event, handler): void;          // Listen to events
   emit(event, data): Promise<void>;            // Emit events to other features
-}
 ```
 
-This allows features to communicate without direct imports, maintaining loose coupling.
+This lets features talk to each other without direct imports. Loose coupling.
 
 ### Adding a New Feature
 
@@ -147,7 +146,7 @@ This allows features to communicate without direct imports, maintaining loose co
        enabled: true
        customOption: value
    ```
-4. Restart AG-Claw — the plugin loader picks it up automatically
+4. Restart AG-Claw. The plugin loader picks it up automatically.
 
 ---
 
@@ -185,24 +184,24 @@ AG-Claw's security is layered, inspired by NemoClaw's isolation approach:
 
 Controls access through configurable rules with pattern matching. Deny rules always override allow rules regardless of priority.
 
-- **exact** — Exact string match
-- **prefix** — Starts-with match
-- **glob** — Wildcard pattern (`*.example.com`)
-- **regex** — Regular expression
+- **exact** - Exact string match
+- **prefix** - Starts-with match
+- **glob** - Wildcard pattern (`*.example.com`)
+- **regex** - Regular expression
 
 Two modes:
-- **permissive** — Default allow, explicit denies block
-- **strict** — Default deny, only explicit allows pass
+- **permissive** - Default allow, explicit denies block
+- **strict** - Default deny, only explicit allows pass
 
 ### Policy Engine
 
 YAML-based security policies evaluated at runtime:
 
-- **Conditions** — Match against context fields (user, action, resource, channel)
-- **Operators** — equals, not_equals, contains, matches, greater_than, less_than, in
-- **Actions** — allow, deny, audit, rate_limit
-- **Priorities** — Higher priority rules evaluated first
-- **Rate Limits** — Per-key sliding window rate limiting
+- **Conditions** - Match against context fields (user, action, resource, channel)
+- **Operators** - equals, not_equals, contains, matches, greater_than, less_than, in
+- **Actions** - allow, deny, audit, rate_limit
+- **Priorities** - Higher priority rules evaluated first
+- **Rate Limits** - Per-key sliding window rate limiting
 
 ### Encrypted Secrets
 
@@ -242,20 +241,20 @@ AG-Claw supports pluggable memory backends:
     └─────────┘  └──────────┘  └───────────┘
 ```
 
-**SQLite** — Default. Fast local storage with FTS5 full-text search. Best for single-user deployments.
+**SQLite** - Default. Fast local storage with FTS5 full-text search. Best for single-user deployments.
 
-**Markdown** — Plain text files organized by date/topic. Git-trackable, human-readable, no dependencies.
+**Markdown** - Plain text files organized by date/topic. Git-trackable, human-readable, no dependencies.
 
-**Supabase** — Cloud-hosted PostgreSQL with pgvector for semantic search. Best for multi-device or team use.
+**Supabase** - Cloud-hosted PostgreSQL with pgvector for semantic search. Best for multi-device or team use.
 
 ### Self-Evolving Memory
 
 An overlay system that runs on top of any backend:
 
-1. **Consolidation** — Merges similar memories (Jaccard similarity ≥ threshold)
-2. **Pattern Discovery** — Identifies recurring themes across memories
-3. **Importance Scoring** — Boosts frequently accessed memories, decays unused ones
-4. **Pruning** — Removes stale, low-importance memories to stay within size limits
+1. **Consolidation** - Merges similar memories (Jaccard similarity >= threshold)
+2. **Pattern Discovery** - Identifies recurring themes across memories
+3. **Importance Scoring** - Boosts frequently accessed memories, decays unused ones
+4. **Pruning** - Removes stale, low-importance memories to stay within size limits
 
 Runs on a configurable interval (default: 1 hour).
 
@@ -298,7 +297,7 @@ Environment variables override YAML values:
 ### 1. Single Node (Default)
 
 ```
-User ──▶ AG-Claw (Node.js) ──▶ LLM API
+User --> AG-Claw (Node.js) --> LLM API
               │
               ├── SQLite (local)
               └── Features (in-process)
@@ -309,7 +308,7 @@ Everything runs in a single Node.js process. Simple, low overhead.
 ### 2. Docker
 
 ```
-User ──▶ AG-Claw Container ──▶ LLM API
+User --> AG-Claw Container --> LLM API
               │
               ├── Volume: /app/data
               ├── Volume: /app/memory
@@ -336,9 +335,9 @@ Multiple AG-Claw instances sharing state via Redis and Supabase. Gateway routes 
 
 ## Design Principles
 
-1. **Modular by default** — Every feature is opt-in. Ship only what you need.
-2. **Security first** — Deny by default in strict mode. Audit everything.
-3. **Type-safe** — Zod schemas validate all configuration at startup.
-4. **Hot-reload** — Configuration changes apply without restart.
-5. **Portable** — Runs on a laptop, a VPS, or in Docker. No cloud dependency required.
-6. **Extensible** — Adding a feature means creating one file. The plugin loader does the rest.
+1. **Modular by default** - Every feature is opt-in. Ship only what you need.
+2. **Security first** - Deny by default in strict mode. Audit everything.
+3. **Type-safe** - Zod schemas validate all configuration at startup.
+4. **Hot-reload** - Configuration changes apply without restart.
+5. **Portable** - Runs on a laptop, a VPS, or in Docker. No cloud dependency required.
+6. **Extensible** - Adding a feature means creating one file. The plugin loader does the rest.
