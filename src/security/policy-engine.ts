@@ -1,228 +1,426 @@
 /**
- * Policy Engine
+ * AG-Claw Policy Engine
  *
- * NemoClaw-inspired policy engine for AG-Claw security.
- * Evaluates actions against a configurable policy set with
- * conditions, quotas, and audit logging.
+ * YAML-based security policies loaded from config/security-policy.yaml.
+ * Evaluates actions against rules by role/agent, enforces rate limits
+ * per user/session, and logs all decisions to an audit trail.
  */
 
-import { readFileSync, existsSync } from 'fs';
-import { resolve } from 'path';
+import { readFileSync, existsSync, appendFileSync, mkdirSync } from 'fs';
+import { resolve, dirname } from 'path';
 import { parse } from 'yaml';
+import { createLogger, Logger } from '../core/logger';
 
-/** Policy action */
-export type PolicyAction = 'allow' | 'deny' | 'audit' | 'rate_limit';
+// ─── Types ────────────────────────────────────────────────────
 
-/** Policy condition */
 export interface PolicyCondition {
   field: string;
   operator: 'equals' | 'not_equals' | 'contains' | 'matches' | 'greater_than' | 'less_than' | 'in';
   value: unknown;
 }
 
-/** Policy rule */
 export interface PolicyRule {
   id: string;
   name: string;
   description?: string;
-  action: PolicyAction;
-  conditions: PolicyCondition[];
+  action: 'allow' | 'deny' | 'audit' | 'rate_limit';
   priority: number;
   enabled: boolean;
   auditLevel?: 'none' | 'info' | 'warning' | 'error';
+  conditions: PolicyCondition[];
 }
 
-/** Rate limit configuration */
-export interface RateLimit {
+export interface RateLimitConfig {
   windowMs: number;
   maxRequests: number;
-  keyField: string; // Which field to use as rate limit key
+  keyField: string;
 }
 
-/** Policy evaluation context */
-export interface PolicyContext {
-  action: string;
-  resource: string;
-  user?: string;
-  channel?: string;
-  feature?: string;
-  [key: string]: unknown;
-}
-
-/** Evaluation result */
 export interface PolicyEvaluation {
   allowed: boolean;
-  action: PolicyAction;
+  action: string;
   matchedRule?: PolicyRule;
   reason: string;
   shouldAudit: boolean;
 }
 
-/** Quota tracking */
-interface QuotaEntry {
-  key: string;
+export interface PolicyContext {
+  action: string;
+  resource: string;
+  user?: string;
+  agent?: string;
+  role?: string;
+  channel?: string;
+  feature?: string;
+  sessionId?: string;
+  [key: string]: unknown;
+}
+
+export interface AuditEntry {
+  timestamp: number;
+  isoTime: string;
+  context: PolicyContext;
+  evaluation: PolicyEvaluation;
+}
+
+interface RateLimitState {
   count: number;
   windowStart: number;
 }
 
-/**
- * Policy Engine — NemoClaw-inspired security policy evaluation.
- *
- * Evaluates actions against a set of rules with conditions.
- * Supports allow/deny, audit logging, rate limiting, and quotas.
- *
- * Inspired by NemoClaw's security layer approach.
- */
+// ─── Engine ───────────────────────────────────────────────────
+
 export class PolicyEngine {
   private rules: Map<string, PolicyRule> = new Map();
-  private rateLimits: Map<string, RateLimit> = new Map();
-  private quotas: Map<string, QuotaEntry> = new Map();
-  private auditLog: Array<{ timestamp: number; context: PolicyContext; evaluation: PolicyEvaluation }> = [];
+  private rateLimits: Map<string, RateLimitConfig> = new Map();
+  private rateLimitState: Map<string, RateLimitState> = new Map();
+  private auditLog: AuditEntry[] = [];
+  private logger: Logger;
+  private auditFilePath: string | null = null;
+  private maxAuditLogSize = 10_000;
 
-  /** Load policies from YAML file */
+  constructor() {
+    this.logger = createLogger().child({ feature: 'policy-engine' });
+  }
+
+  /**
+   * Load policies from the YAML config file (config/security-policy.yaml).
+   *
+   * Expected structure:
+   *   rules:
+   *     - id: rule_admin
+   *       name: Admin Access
+   *       action: allow
+   *       priority: 100
+   *       enabled: true
+   *       conditions:
+   *         - field: role
+   *           operator: equals
+   *           value: admin
+   *   rateLimits:
+   *     api_calls:
+   *       windowMs: 60000
+   *       maxRequests: 60
+   *       keyField: user
+   */
   loadFromFile(filePath: string): void {
     const fullPath = resolve(filePath);
     if (!existsSync(fullPath)) {
-      throw new Error(`Policy file not found: ${fullPath}`);
+      this.logger.warn(`Policy file not found: ${fullPath}`);
+      return;
     }
 
-    const raw = readFileSync(fullPath, 'utf-8');
-    const config = parse(raw) as {
-      rules?: PolicyRule[];
-      rateLimits?: Record<string, RateLimit>;
-    };
+    try {
+      const raw = readFileSync(fullPath, 'utf-8');
+      const config = parse(raw) as {
+        rules?: PolicyRule[];
+        rateLimits?: Record<string, RateLimitConfig>;
+      };
 
-    if (config.rules) {
-      for (const rule of config.rules) {
-        this.addRule(rule);
+      // Load rules
+      if (config.rules && Array.isArray(config.rules)) {
+        for (const rule of config.rules) {
+          this.addRule(rule);
+        }
+        this.logger.info(`Loaded ${config.rules.length} policy rules`);
       }
-    }
 
-    if (config.rateLimits) {
-      for (const [key, limit] of Object.entries(config.rateLimits)) {
-        this.rateLimits.set(key, limit);
+      // Load rate limits
+      if (config.rateLimits) {
+        for (const [name, limit] of Object.entries(config.rateLimits)) {
+          this.rateLimits.set(name, limit);
+        }
+        this.logger.info(`Loaded ${Object.keys(config.rateLimits).length} rate limit configs`);
       }
+    } catch (err) {
+      this.logger.error(`Failed to load policy file: ${fullPath}`, {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
-  /** Add a policy rule */
+  /**
+   * Add a policy rule programmatically.
+   */
   addRule(rule: PolicyRule): void {
     this.rules.set(rule.id, rule);
   }
 
-  /** Remove a rule */
+  /**
+   * Remove a rule by ID.
+   */
   removeRule(id: string): boolean {
     return this.rules.delete(id);
   }
 
-  /** Evaluate a context against all rules */
+  /**
+   * Evaluate an action context against all loaded policies.
+   *
+   * Evaluation order:
+   * 1. Rate limits (if user/session specified)
+   * 2. Rules sorted by priority (highest first)
+   * 3. First matching rule wins
+   * 4. Default: allow
+   */
   evaluate(context: PolicyContext): PolicyEvaluation {
-    // Check rate limits first
-    if (context.user) {
-      for (const [key, limit] of this.rateLimits) {
-        const rateResult = this.checkRateLimit(context.user, limit);
-        if (!rateResult) {
-          return {
-            allowed: false,
-            action: 'rate_limit',
-            reason: `Rate limit exceeded for key: ${key}`,
-            shouldAudit: true,
-          };
-        }
+    // 1. Check rate limits
+    if (context.user || context.sessionId) {
+      const rateLimitResult = this.checkRateLimits(context);
+      if (rateLimitResult) {
+        this.recordAudit(context, rateLimitResult);
+        return rateLimitResult;
       }
     }
 
-    // Evaluate rules by priority
+    // 2. Sort rules by priority (highest first)
     const sortedRules = Array.from(this.rules.values())
       .filter(r => r.enabled)
       .sort((a, b) => b.priority - a.priority);
 
+    // 3. Find first matching rule
     for (const rule of sortedRules) {
       if (this.evaluateConditions(rule.conditions, context)) {
         const evaluation: PolicyEvaluation = {
-          allowed: rule.action === 'allow',
+          allowed: rule.action === 'allow' || rule.action === 'audit',
           action: rule.action,
           matchedRule: rule,
           reason: `Matched rule: ${rule.name}`,
-          shouldAudit: rule.auditLevel !== 'none',
+          shouldAudit: (rule.auditLevel ?? 'none') !== 'none',
         };
 
-        if (evaluation.shouldAudit) {
-          this.auditLog.push({ timestamp: Date.now(), context, evaluation });
-        }
-
+        this.recordAudit(context, evaluation);
         return evaluation;
       }
     }
 
-    // Default: allow
-    return {
+    // 4. Default: allow
+    const defaultEval: PolicyEvaluation = {
       allowed: true,
       action: 'allow',
       reason: 'No matching rule, default allow',
       shouldAudit: false,
     };
+
+    return defaultEval;
   }
 
-  /** Evaluate conditions against context */
-  private evaluateConditions(conditions: PolicyCondition[], context: PolicyContext): boolean {
-    return conditions.every(cond => {
-      const value = context[cond.field];
-      switch (cond.operator) {
-        case 'equals':
-          return value === cond.value;
-        case 'not_equals':
-          return value !== cond.value;
-        case 'contains':
-          return typeof value === 'string' && value.includes(cond.value as string);
-        case 'matches':
-          return typeof value === 'string' && new RegExp(cond.value as string).test(value);
-        case 'greater_than':
-          return typeof value === 'number' && value > (cond.value as number);
-        case 'less_than':
-          return typeof value === 'number' && value < (cond.value as number);
-        case 'in':
-          return Array.isArray(cond.value) && (cond.value as unknown[]).includes(value);
-        default:
-          return false;
-      }
-    });
+  /**
+   * Quick helper: is this action allowed?
+   */
+  isAllowed(context: PolicyContext): boolean {
+    return this.evaluate(context).allowed;
   }
 
-  /** Check rate limit for a key */
-  private checkRateLimit(key: string, limit: RateLimit): boolean {
-    const now = Date.now();
-    const entry = this.quotas.get(key);
-
-    if (!entry || now - entry.windowStart > limit.windowMs) {
-      this.quotas.set(key, { key, count: 1, windowStart: now });
-      return true;
-    }
-
-    entry.count++;
-    return entry.count <= limit.maxRequests;
-  }
-
-  /** Get audit log */
-  getAuditLog(limit = 100): typeof this.auditLog {
+  /**
+   * Get the audit log.
+   */
+  getAuditLog(limit = 100): AuditEntry[] {
     return this.auditLog.slice(-limit);
   }
 
-  /** Clear audit log */
+  /**
+   * Clear the in-memory audit log.
+   */
   clearAuditLog(): void {
     this.auditLog = [];
   }
 
-  /** Get all rules */
+  /**
+   * Enable file-based audit logging.
+   */
+  enableAuditFile(filePath: string): void {
+    this.auditFilePath = resolve(filePath);
+    const dir = dirname(this.auditFilePath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    this.logger.info(`Audit file logging enabled: ${this.auditFilePath}`);
+  }
+
+  /**
+   * Get all loaded rules.
+   */
   getRules(): PolicyRule[] {
     return Array.from(this.rules.values()).sort((a, b) => b.priority - a.priority);
   }
 
-  /** Enable/disable a rule */
+  /**
+   * Enable or disable a rule.
+   */
   setRuleEnabled(id: string, enabled: boolean): boolean {
     const rule = this.rules.get(id);
     if (!rule) return false;
     rule.enabled = enabled;
     return true;
   }
+
+  /**
+   * Get rate limit status for a key.
+   */
+  getRateLimitStatus(key: string): { count: number; remaining: number; resetIn: number } | null {
+    const state = this.rateLimitState.get(key);
+    if (!state) return null;
+
+    // Find applicable limit (check all, use the most restrictive)
+    let minRemaining = Infinity;
+    let minResetIn = 0;
+
+    for (const [, config] of this.rateLimits) {
+      const elapsed = Date.now() - state.windowStart;
+      if (elapsed > config.windowMs) {
+        return { count: 0, remaining: config.maxRequests, resetIn: 0 };
+      }
+      const remaining = Math.max(0, config.maxRequests - state.count);
+      const resetIn = config.windowMs - elapsed;
+      if (remaining < minRemaining) {
+        minRemaining = remaining;
+        minResetIn = resetIn;
+      }
+    }
+
+    return { count: state.count, remaining: minRemaining, resetIn: minResetIn };
+  }
+
+  // ─── Internal ─────────────────────────────────────────────
+
+  private evaluateConditions(conditions: PolicyCondition[], context: PolicyContext): boolean {
+    if (!conditions || conditions.length === 0) return true;
+
+    return conditions.every(cond => {
+      const value = context[cond.field];
+
+      switch (cond.operator) {
+        case 'equals':
+          return value === cond.value;
+
+        case 'not_equals':
+          return value !== cond.value;
+
+        case 'contains':
+          return typeof value === 'string' && value.includes(String(cond.value));
+
+        case 'matches':
+          if (typeof value !== 'string') return false;
+          try {
+            return new RegExp(String(cond.value)).test(value);
+          } catch {
+            return false;
+          }
+
+        case 'greater_than':
+          return typeof value === 'number' && value > Number(cond.value);
+
+        case 'less_than':
+          return typeof value === 'number' && value < Number(cond.value);
+
+        case 'in':
+          return Array.isArray(cond.value) && (cond.value as unknown[]).includes(value);
+
+        default:
+          return false;
+      }
+    });
+  }
+
+  private checkRateLimits(context: PolicyContext): PolicyEvaluation | null {
+    const now = Date.now();
+
+    for (const [name, config] of this.rateLimits) {
+      const keyValue = (context[config.keyField] as string) ?? 'anonymous';
+      const stateKey = `${name}:${keyValue}`;
+
+      let state = this.rateLimitState.get(stateKey);
+
+      if (!state || now - state.windowStart > config.windowMs) {
+        // New window
+        state = { count: 1, windowStart: now };
+        this.rateLimitState.set(stateKey, state);
+        continue;
+      }
+
+      state.count++;
+
+      if (state.count > config.maxRequests) {
+        const resetIn = config.windowMs - (now - state.windowStart);
+        return {
+          allowed: false,
+          action: 'rate_limit',
+          reason: `Rate limit exceeded for ${name}: ${state.count}/${config.maxRequests} (resets in ${Math.ceil(resetIn / 1000)}s)`,
+          shouldAudit: true,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  private recordAudit(context: PolicyContext, evaluation: PolicyEvaluation): void {
+    if (!evaluation.shouldAudit) return;
+
+    const entry: AuditEntry = {
+      timestamp: Date.now(),
+      isoTime: new Date().toISOString(),
+      context: { ...context },
+      evaluation: { ...evaluation },
+    };
+
+    // In-memory log
+    this.auditLog.push(entry);
+    if (this.auditLog.length > this.maxAuditLogSize) {
+      this.auditLog = this.auditLog.slice(-Math.floor(this.maxAuditLogSize / 2));
+    }
+
+    // File-based audit log
+    if (this.auditFilePath) {
+      try {
+        const line = JSON.stringify(entry) + '\n';
+        appendFileSync(this.auditFilePath, line, 'utf-8');
+      } catch (err) {
+        this.logger.error('Failed to write audit log', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    // Log based on audit level
+    const level = evaluation.matchedRule?.auditLevel ?? 'info';
+    const logMsg = `Policy ${evaluation.action}: ${context.action} by ${context.user ?? 'unknown'}`;
+    const logData = {
+      rule: evaluation.matchedRule?.id,
+      reason: evaluation.reason,
+      resource: context.resource,
+    };
+
+    switch (level) {
+      case 'error':
+        this.logger.error(logMsg, logData);
+        break;
+      case 'warning':
+        this.logger.warn(logMsg, logData);
+        break;
+      default:
+        this.logger.info(logMsg, logData);
+    }
+  }
+}
+
+// ─── Singleton ────────────────────────────────────────────────
+
+let instance: PolicyEngine | null = null;
+
+/**
+ * Get or create the global policy engine.
+ */
+export function getPolicyEngine(): PolicyEngine {
+  if (!instance) {
+    instance = new PolicyEngine();
+  }
+  return instance;
+}
+
+/**
+ * Reset the singleton (for testing).
+ */
+export function resetPolicyEngine(): void {
+  instance = null;
 }

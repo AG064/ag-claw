@@ -1,199 +1,300 @@
 /**
- * Encrypted Secrets
+ * AG-Claw Encrypted Secrets
  *
- * Manages sensitive configuration values with AES-256-GCM encryption.
- * Stores encrypted secrets in a local file with key derivation from passphrase.
+ * AES-256-GCM encryption for sensitive values.
+ * Master key from AGCLAW_MASTER_KEY env var (or passed explicitly).
+ * Secrets stored in a JSON file on disk, encrypted at rest.
  */
 
-import { createCipheriv, createDecipheriv, randomBytes, pbkdf2Sync, createHash } from 'crypto';
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  pbkdf2Sync,
+} from 'crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
+import { createLogger, Logger } from '../core/logger';
 
-/** Encrypted secret entry */
-export interface EncryptedSecret {
-  id: string;
+// ─── Types ────────────────────────────────────────────────────
+
+interface SecretEntry {
   key: string;
-  iv: string;
-  salt: string;
-  ciphertext: string;
-  tag: string; // GCM auth tag
+  iv: string;         // hex
+  salt: string;       // hex (per-secret salt for key derivation)
+  ciphertext: string; // hex
+  tag: string;        // GCM auth tag, hex
   createdAt: number;
   updatedAt: number;
 }
 
-/** Secrets vault file format */
-interface SecretsVault {
+interface SecretsFile {
   version: number;
-  secrets: EncryptedSecret[];
+  secrets: SecretEntry[];
+}
+
+// ─── Constants ────────────────────────────────────────────────
+
+const SALT_LENGTH = 16;
+const IV_LENGTH = 16;
+const KEY_LENGTH = 32;
+const PBKDF2_ITERATIONS = 100_000;
+const FILE_VERSION = 1;
+
+const DEFAULT_STORE_PATH = resolve(process.cwd(), 'data/secrets.enc.json');
+
+// ─── Logger ───────────────────────────────────────────────────
+
+let logger: Logger;
+function getLogger(): Logger {
+  if (!logger) {
+    logger = createLogger().child({ feature: 'encrypted-secrets' });
+  }
+  return logger;
+}
+
+// ─── Internal crypto ──────────────────────────────────────────
+
+/**
+ * Derive a 256-bit encryption key from the master key + per-secret salt.
+ */
+function deriveKey(masterKey: Buffer, salt: Buffer): Buffer {
+  return pbkdf2Sync(masterKey, salt, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha256');
 }
 
 /**
- * Encrypted secrets manager with AES-256-GCM.
- *
- * Derives encryption key from a passphrase using PBKDF2.
- * Each secret is encrypted with a unique IV and salt.
- *
- * Usage:
- * ```ts
- * const secrets = new EncryptedSecrets();
- * secrets.init('my-passphrase');
- * secrets.set('api_key', 'sk-123456');
- * const key = secrets.get('api_key');
- * ```
+ * Resolve the master key buffer.
+ * Priority: explicit arg → AGCLAW_MASTER_KEY env → error.
  */
-export class EncryptedSecrets {
-  private secrets: Map<string, EncryptedSecret> = new Map();
-  private masterKey: Buffer | null = null;
-  private storePath: string;
-
-  constructor(storePath: string = './data/secrets.enc') {
-    this.storePath = resolve(storePath);
-  }
-
-  /** Initialize with a passphrase */
-  init(passphrase: string): void {
-    // Derive a stable master key from the passphrase
-    const salt = this.getStableSalt();
-    this.masterKey = pbkdf2Sync(passphrase, salt, 100000, 32, 'sha256');
-
-    // Load existing secrets
-    if (existsSync(this.storePath)) {
-      this.load();
-    }
-  }
-
-  /** Get a stable salt (hash of the store path) */
-  private getStableSalt(): Buffer {
-    return createHash('sha256').update(this.storePath).digest();
-  }
-
-  /** Encrypt a value */
-  private encrypt(plaintext: string): { iv: string; salt: string; ciphertext: string; tag: string } {
-    if (!this.masterKey) throw new Error('Secrets not initialized. Call init() first.');
-
-    const iv = randomBytes(16);
-    const salt = randomBytes(16);
-    const key = pbkdf2Sync(this.masterKey, salt, 10000, 32, 'sha256');
-
-    const cipher = createCipheriv('aes-256-gcm', key, iv);
-    const encrypted = Buffer.concat([cipher.update(plaintext, 'utf-8'), cipher.final()]);
-    const tag = cipher.getAuthTag();
-
-    return {
-      iv: iv.toString('hex'),
-      salt: salt.toString('hex'),
-      ciphertext: encrypted.toString('hex'),
-      tag: tag.toString('hex'),
-    };
-  }
-
-  /** Decrypt a value */
-  private decrypt(iv: string, salt: string, ciphertext: string, tag: string): string {
-    if (!this.masterKey) throw new Error('Secrets not initialized. Call init() first.');
-
-    const key = pbkdf2Sync(
-      this.masterKey,
-      Buffer.from(salt, 'hex'),
-      10000,
-      32,
-      'sha256'
+function resolveMasterKey(explicit?: string): Buffer {
+  const raw = explicit ?? process.env.AGCLAW_MASTER_KEY;
+  if (!raw || raw.length === 0) {
+    throw new Error(
+      'Master key not provided. Set AGCLAW_MASTER_KEY env var or pass key to init().',
     );
+  }
+  // Derive a stable 32-byte key from whatever passphrase the user provides
+  return pbkdf2Sync(raw, 'ag-claw-master-salt', PBKDF2_ITERATIONS, KEY_LENGTH, 'sha256');
+}
 
-    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'hex'));
-    decipher.setAuthTag(Buffer.from(tag, 'hex'));
+// ─── Public API: standalone functions ─────────────────────────
+
+/**
+ * Encrypt a plaintext value using AES-256-GCM.
+ *
+ * Returns a single string: `iv:salt:ciphertext:tag` (all hex).
+ *
+ * @param masterKey - Master key passphrase or Buffer
+ * @param value     - Plaintext to encrypt
+ */
+export function encrypt(masterKey: string | Buffer, value: string): string {
+  const keyBuf = typeof masterKey === 'string' ? resolveMasterKey(masterKey) : masterKey;
+  const iv = randomBytes(IV_LENGTH);
+  const salt = randomBytes(SALT_LENGTH);
+  const derivedKey = deriveKey(keyBuf, salt);
+
+  const cipher = createCipheriv('aes-256-gcm', derivedKey, iv);
+  const encrypted = Buffer.concat([cipher.update(value, 'utf-8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  return [iv.toString('hex'), salt.toString('hex'), encrypted.toString('hex'), tag.toString('hex')].join(':');
+}
+
+/**
+ * Decrypt a value previously encrypted with encrypt().
+ *
+ * @param masterKey  - Master key passphrase or Buffer
+ * @param encrypted  - String in format `iv:salt:ciphertext:tag`
+ */
+export function decrypt(masterKey: string | Buffer, encrypted: string): string {
+  const keyBuf = typeof masterKey === 'string' ? resolveMasterKey(masterKey) : masterKey;
+  const parts = encrypted.split(':');
+  if (parts.length !== 4) {
+    throw new Error('Invalid encrypted format. Expected iv:salt:ciphertext:tag');
+  }
+
+  const [ivHex, saltHex, ctHex, tagHex] = parts as [string, string, string, string];
+  const iv = Buffer.from(ivHex, 'hex');
+  const salt = Buffer.from(saltHex, 'hex');
+  const derivedKey = deriveKey(keyBuf, salt);
+
+  const decipher = createDecipheriv('aes-256-gcm', derivedKey, iv);
+  decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+
+  const decrypted = Buffer.concat([
+    decipher.update(Buffer.from(ctHex, 'hex')),
+    decipher.final(),
+  ]);
+
+  return decrypted.toString('utf-8');
+}
+
+// ─── Public API: file-backed vault ────────────────────────────
+
+let vaultCache: SecretsFile | null = null;
+let vaultPath: string = DEFAULT_STORE_PATH;
+
+/**
+ * Store a secret — encrypts and persists to the vault file.
+ *
+ * @param key   - Secret name (e.g. "OPENAI_API_KEY")
+ * @param value - Secret value
+ * @param filePath - Optional vault file path (default: data/secrets.enc.json)
+ */
+export function store(key: string, value: string, filePath?: string): void {
+  const path = filePath ?? vaultPath;
+  const masterKey = resolveMasterKey();
+  const now = Date.now();
+
+  const vault = loadVault(path);
+
+  const existing = vault.secrets.find(s => s.key === key);
+
+  // Encrypt with a fresh IV + salt
+  const iv = randomBytes(IV_LENGTH);
+  const salt = randomBytes(SALT_LENGTH);
+  const derivedKey = deriveKey(masterKey, salt);
+
+  const cipher = createCipheriv('aes-256-gcm', derivedKey, iv);
+  const encrypted = Buffer.concat([cipher.update(value, 'utf-8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+
+  const entry: SecretEntry = {
+    key,
+    iv: iv.toString('hex'),
+    salt: salt.toString('hex'),
+    ciphertext: encrypted.toString('hex'),
+    tag: tag.toString('hex'),
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  if (existing) {
+    Object.assign(existing, entry);
+  } else {
+    vault.secrets.push(entry);
+  }
+
+  saveVault(path, vault);
+  getLogger().info(`Secret stored: ${key}`, { path });
+}
+
+/**
+ * Retrieve and decrypt a secret from the vault file.
+ *
+ * @param key      - Secret name
+ * @param filePath - Optional vault file path
+ * @returns Decrypted value or null if not found
+ */
+export function retrieve(key: string, filePath?: string): string | null {
+  const path = filePath ?? vaultPath;
+  const masterKey = resolveMasterKey();
+  const vault = loadVault(path);
+
+  const entry = vault.secrets.find(s => s.key === key);
+  if (!entry) {
+    getLogger().debug(`Secret not found: ${key}`);
+    return null;
+  }
+
+  try {
+    const derivedKey = deriveKey(masterKey, Buffer.from(entry.salt, 'hex'));
+    const decipher = createDecipheriv('aes-256-gcm', derivedKey, Buffer.from(entry.iv, 'hex'));
+    decipher.setAuthTag(Buffer.from(entry.tag, 'hex'));
 
     const decrypted = Buffer.concat([
-      decipher.update(Buffer.from(ciphertext, 'hex')),
+      decipher.update(Buffer.from(entry.ciphertext, 'hex')),
       decipher.final(),
     ]);
 
     return decrypted.toString('utf-8');
+  } catch (err) {
+    getLogger().error(`Failed to decrypt secret: ${key}`, {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+/**
+ * Delete a secret from the vault.
+ */
+export function removeSecret(key: string, filePath?: string): boolean {
+  const path = filePath ?? vaultPath;
+  const vault = loadVault(path);
+  const idx = vault.secrets.findIndex(s => s.key === key);
+  if (idx === -1) return false;
+
+  vault.secrets.splice(idx, 1);
+  saveVault(path, vault);
+  getLogger().info(`Secret deleted: ${key}`);
+  return true;
+}
+
+/**
+ * List all secret keys (values are NOT returned).
+ */
+export function listSecrets(filePath?: string): string[] {
+  const path = filePath ?? vaultPath;
+  const vault = loadVault(path);
+  return vault.secrets.map(s => s.key);
+}
+
+/**
+ * Check if a secret exists in the vault.
+ */
+export function hasSecret(key: string, filePath?: string): boolean {
+  const path = filePath ?? vaultPath;
+  const vault = loadVault(path);
+  return vault.secrets.some(s => s.key === key);
+}
+
+/**
+ * Set the default vault file path.
+ */
+export function setVaultPath(path: string): void {
+  vaultPath = resolve(path);
+}
+
+// ─── Vault file I/O ───────────────────────────────────────────
+
+function loadVault(path: string): SecretsFile {
+  const resolved = resolve(path);
+  if (vaultCache) return vaultCache;
+
+  if (!existsSync(resolved)) {
+    vaultCache = { version: FILE_VERSION, secrets: [] };
+    return vaultCache;
   }
 
-  /** Store a secret */
-  set(key: string, value: string): void {
-    const now = Date.now();
-    const encrypted = this.encrypt(value);
-
-    const existing = this.secrets.get(key);
-    const secret: EncryptedSecret = {
-      id: existing?.id ?? `sec_${key}`,
-      key,
-      ...encrypted,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-    };
-
-    this.secrets.set(key, secret);
-    this.save();
+  try {
+    const raw = readFileSync(resolved, 'utf-8');
+    const parsed = JSON.parse(raw) as SecretsFile;
+    vaultCache = parsed.version === FILE_VERSION
+      ? parsed
+      : { version: FILE_VERSION, secrets: parsed.secrets ?? [] };
+  } catch (err) {
+    getLogger().warn(`Corrupt vault file, starting fresh: ${resolved}`);
+    vaultCache = { version: FILE_VERSION, secrets: [] };
   }
 
-  /** Retrieve a decrypted secret */
-  get(key: string): string | null {
-    const secret = this.secrets.get(key);
-    if (!secret) return null;
+  return vaultCache;
+}
 
-    try {
-      return this.decrypt(secret.iv, secret.salt, secret.ciphertext, secret.tag);
-    } catch {
-      return null;
-    }
+function saveVault(path: string, vault: SecretsFile): void {
+  const resolved = resolve(path);
+  const dir = dirname(resolved);
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
   }
 
-  /** Check if a secret exists */
-  has(key: string): boolean {
-    return this.secrets.has(key);
-  }
+  writeFileSync(resolved, JSON.stringify(vault, null, 2), 'utf-8');
+  vaultCache = vault;
+}
 
-  /** Delete a secret */
-  delete(key: string): boolean {
-    const result = this.secrets.delete(key);
-    if (result) this.save();
-    return result;
-  }
-
-  /** List all secret keys (not values) */
-  listKeys(): string[] {
-    return Array.from(this.secrets.keys());
-  }
-
-  /** Save encrypted secrets to file */
-  private save(): void {
-    if (!this.masterKey) return;
-
-    const dir = dirname(this.storePath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-
-    const vault: SecretsVault = {
-      version: 1,
-      secrets: Array.from(this.secrets.values()),
-    };
-
-    writeFileSync(this.storePath, JSON.stringify(vault, null, 2), 'utf-8');
-  }
-
-  /** Load encrypted secrets from file */
-  private load(): void {
-    try {
-      const raw = readFileSync(this.storePath, 'utf-8');
-      const vault: SecretsVault = JSON.parse(raw);
-
-      if (vault.secrets) {
-        for (const secret of vault.secrets) {
-          this.secrets.set(secret.key, secret);
-        }
-      }
-    } catch {
-      // File doesn't exist or is corrupt — start fresh
-    }
-  }
-
-  /** Clear all secrets from memory and storage */
-  clear(): void {
-    this.secrets.clear();
-    this.masterKey = null;
-    this.save();
-  }
+/**
+ * Clear vault cache (for testing or after key rotation).
+ */
+export function clearVaultCache(): void {
+  vaultCache = null;
 }

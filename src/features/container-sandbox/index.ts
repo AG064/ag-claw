@@ -1,257 +1,240 @@
 /**
- * Container Sandbox Feature
+ * AG-Claw Container Sandbox
  *
- * Isolated code execution in Docker containers with resource limits,
- * network isolation, and temporary filesystems.
+ * Runs shell commands inside isolated Docker containers.
+ * Features:
+ *   - Network isolation (--network none)
+ *   - Read-only root filesystem
+ *   - Limited tmpfs for /tmp
+ *   - Memory + CPU limits
+ *   - Timeout enforcement (kills container after N ms)
+ *   - Returns stdout, stderr, exit code
  */
 
-import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../core/plugin-loader';
+import { spawn } from 'child_process';
+import { resolve } from 'path';
+import { createLogger, Logger } from '../../core/logger';
+import { FeatureModule, FeatureContext, FeatureMeta, HealthStatus } from '../../core/plugin-loader';
 
-/** Container sandbox configuration */
-export interface ContainerSandboxConfig {
+// ─── Types ────────────────────────────────────────────────────
+
+export interface SandboxConfig {
   enabled: boolean;
-  defaultImage: string;
+  image: string;
   memoryLimit: string;
-  cpuLimit: number;
+  cpuLimit: string;
   timeoutMs: number;
-  maxContainers: number;
-  networkMode: 'none' | 'bridge' | 'host';
-  allowedLanguages: string[];
+  workspacePath: string;
+  networkAccess: boolean;
+  readOnlyRoot: boolean;
+  tmpfsSize: string;
 }
 
-/** Execution request */
-export interface ExecutionRequest {
-  language: string;
-  code: string;
-  stdin?: string;
-  files?: Record<string, string>; // filename -> content
-  environment?: Record<string, string>;
-}
-
-/** Execution result */
-export interface ExecutionResult {
+export interface SandboxResult {
   success: boolean;
   stdout: string;
   stderr: string;
   exitCode: number;
   durationMs: number;
-  memoryUsedMb: number;
-  files?: Record<string, string>; // output files
+  timedOut: boolean;
 }
 
-/** Container instance */
-interface ContainerInstance {
-  id: string;
-  language: string;
-  createdAt: number;
-  status: 'running' | 'stopped' | 'error';
-}
-
-/** Language image mapping */
-const LANGUAGE_IMAGES: Record<string, string> = {
-  python: 'python:3.12-slim',
-  javascript: 'node:20-slim',
-  typescript: 'node:20-slim',
-  java: 'openjdk:21-slim',
-  go: 'golang:1.22-alpine',
-  rust: 'rust:1.76-slim',
-  bash: 'ubuntu:22.04',
-  ruby: 'ruby:3.3-slim',
+const DEFAULT_CONFIG: SandboxConfig = {
+  enabled: false,
+  image: 'node:20-alpine',
+  memoryLimit: '256m',
+  cpuLimit: '1.0',
+  timeoutMs: 30000,
+  workspacePath: resolve(process.cwd(), 'data/workspace'),
+  networkAccess: false,
+  readOnlyRoot: true,
+  tmpfsSize: '64m',
 };
 
+// ─── Core execution ───────────────────────────────────────────
+
 /**
- * Container Sandbox feature — isolated code execution.
+ * Execute a shell command inside an isolated Docker container.
  *
- * Runs untrusted code in isolated Docker containers with resource
- * limits, network restrictions, and automatic cleanup.
+ * @param command - Shell command to run
+ * @param options - Sandbox configuration overrides
  */
+export function runInSandbox(
+  command: string,
+  options: Partial<SandboxConfig> = {},
+): Promise<SandboxResult> {
+  const config: SandboxConfig = { ...DEFAULT_CONFIG, ...options };
+  const startTime = Date.now();
+
+  return new Promise<SandboxResult>((resolvePromise) => {
+    const args = buildDockerArgs(config, command);
+
+    const log = createLogger().child({ feature: 'container-sandbox' });
+    log.debug('Sandbox exec', { command, image: config.image });
+
+    const proc = spawn('docker', args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: config.timeoutMs + 5000, // slight buffer over container timeout
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+
+    // Timeout enforcement
+    const killTimer = setTimeout(() => {
+      timedOut = true;
+      // Kill the docker container by name
+      const containerName = args[args.indexOf('--name') + 1];
+      if (containerName) {
+        spawn('docker', ['kill', containerName], { stdio: 'ignore' });
+      }
+      proc.kill('SIGKILL');
+    }, config.timeoutMs);
+
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+
+    proc.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    proc.on('close', (code) => {
+      clearTimeout(killTimer);
+      const durationMs = Date.now() - startTime;
+
+      resolvePromise({
+        success: code === 0 && !timedOut,
+        stdout: stdout.trim(),
+        stderr: stderr.trim(),
+        exitCode: code ?? -1,
+        durationMs,
+        timedOut,
+      });
+    });
+
+    proc.on('error', (err) => {
+      clearTimeout(killTimer);
+      resolvePromise({
+        success: false,
+        stdout: '',
+        stderr: `Failed to start sandbox: ${err.message}`,
+        exitCode: -1,
+        durationMs: Date.now() - startTime,
+        timedOut: false,
+      });
+    });
+
+    // Close stdin (no interactive input)
+    proc.stdin.end();
+  });
+}
+
+/**
+ * Build docker run arguments for sandboxed execution.
+ */
+function buildDockerArgs(config: SandboxConfig, command: string): string[] {
+  const containerName = `agclaw-sandbox-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+  const args: string[] = [
+    'run',
+    '--rm',
+    '--name', containerName,
+    '--memory', config.memoryLimit,
+    '--cpus', config.cpuLimit,
+    '--pids-limit', '64',
+  ];
+
+  // Network isolation
+  if (!config.networkAccess) {
+    args.push('--network', 'none');
+  }
+
+  // Read-only root filesystem
+  if (config.readOnlyRoot) {
+    args.push('--read-only');
+  }
+
+  // Tmpfs for /tmp
+  args.push('--tmpfs', `/tmp:size=${config.tmpfsSize}`);
+
+  // Mount workspace as read-only
+  const ws = resolve(config.workspacePath);
+  args.push('-v', `${ws}:/app/workspace:ro`);
+
+  // Working directory
+  args.push('-w', '/app/workspace');
+
+  // Image
+  args.push(config.image);
+
+  // Shell command
+  args.push('sh', '-c', command);
+
+  return args;
+}
+
+// ─── Feature module (for plugin-loader integration) ───────────
+
 class ContainerSandboxFeature implements FeatureModule {
   readonly meta: FeatureMeta = {
     name: 'container-sandbox',
-    version: '0.1.0',
-    description: 'Isolated code execution in Docker containers',
+    version: '0.2.0',
+    description: 'Docker-based command sandboxing with isolation',
     dependencies: [],
   };
 
-  private config: ContainerSandboxConfig = {
-    enabled: false,
-    defaultImage: 'ubuntu:22.04',
-    memoryLimit: '256m',
-    cpuLimit: 0.5,
-    timeoutMs: 30000,
-    maxContainers: 5,
-    networkMode: 'none',
-    allowedLanguages: ['python', 'javascript', 'typescript', 'bash'],
-  };
+  private config: SandboxConfig = { ...DEFAULT_CONFIG };
   private ctx!: FeatureContext;
-  private containers: Map<string, ContainerInstance> = new Map();
 
   async init(config: Record<string, unknown>, context: FeatureContext): Promise<void> {
     this.ctx = context;
-    this.config = { ...this.config, ...(config as Partial<ContainerSandboxConfig>) };
+    this.config = {
+      ...DEFAULT_CONFIG,
+      ...(config as Partial<SandboxConfig>),
+    };
   }
 
   async start(): Promise<void> {
-    // Verify Docker is available
-    this.ctx.logger.info('Container Sandbox active', {
-      maxContainers: this.config.maxContainers,
-      networkMode: this.config.networkMode,
+    this.ctx.logger.info('Container Sandbox ready', {
+      image: this.config.image,
+      memory: this.config.memoryLimit,
+      timeout: `${this.config.timeoutMs}ms`,
+      network: this.config.networkAccess ? 'enabled' : 'isolated',
     });
   }
 
   async stop(): Promise<void> {
-    // Clean up all containers
-    for (const [id] of this.containers) {
-      await this.stopContainer(id);
-    }
+    this.ctx.logger.info('Container Sandbox stopped');
   }
 
   async healthCheck(): Promise<HealthStatus> {
-    const running = Array.from(this.containers.values()).filter(c => c.status === 'running').length;
-    return {
-      healthy: running < this.config.maxContainers,
-      details: {
-        containers: this.containers.size,
-        running,
-        maxContainers: this.config.maxContainers,
-      },
-    };
-  }
-
-  /** Check if a language is supported */
-  isLanguageSupported(language: string): boolean {
-    return this.config.allowedLanguages.includes(language);
-  }
-
-  /** Execute code in a sandboxed container */
-  async execute(request: ExecutionRequest): Promise<ExecutionResult> {
-    if (!this.isLanguageSupported(request.language)) {
-      return {
-        success: false,
-        stdout: '',
-        stderr: `Language not supported: ${request.language}`,
-        exitCode: -1,
-        durationMs: 0,
-        memoryUsedMb: 0,
-      };
-    }
-
-    if (this.containers.size >= this.config.maxContainers) {
-      return {
-        success: false,
-        stdout: '',
-        stderr: 'Maximum container limit reached',
-        exitCode: -1,
-        durationMs: 0,
-        memoryUsedMb: 0,
-      };
-    }
-
-    const containerId = `sandbox_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const image = LANGUAGE_IMAGES[request.language] ?? this.config.defaultImage;
-
-    this.containers.set(containerId, {
-      id: containerId,
-      language: request.language,
-      createdAt: Date.now(),
-      status: 'running',
-    });
-
-    const startTime = Date.now();
-
     try {
-      // Build docker command
-      const dockerCmd = this.buildDockerCommand(containerId, image, request);
-
-      // Execute (this would use child_process.spawn in real implementation)
-      this.ctx.logger.debug('Executing in sandbox', {
-        containerId,
-        language: request.language,
-        image,
+      // Quick check: can we reach docker?
+      const result = await runInSandbox('echo ok', {
+        ...this.config,
+        timeoutMs: 5000,
       });
 
-      // Simulate execution result
-      const result: ExecutionResult = {
-        success: true,
-        stdout: '[Sandbox execution placeholder]',
-        stderr: '',
-        exitCode: 0,
-        durationMs: Date.now() - startTime,
-        memoryUsedMb: 0,
-      };
-
-      this.containers.get(containerId)!.status = 'stopped';
-      return result;
-    } catch (err) {
-      const container = this.containers.get(containerId);
-      if (container) container.status = 'error';
-
       return {
-        success: false,
-        stdout: '',
-        stderr: err instanceof Error ? err.message : String(err),
-        exitCode: -1,
-        durationMs: Date.now() - startTime,
-        memoryUsedMb: 0,
+        healthy: result.success,
+        message: result.success ? 'Docker sandbox operational' : result.stderr,
+        details: { exitCode: result.exitCode },
       };
-    } finally {
-      await this.cleanupContainer(containerId);
+    } catch (err) {
+      return {
+        healthy: false,
+        message: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
-  /** Build Docker run command */
-  private buildDockerCommand(containerId: string, image: string, request: ExecutionRequest): string[] {
-    const cmd = [
-      'docker', 'run',
-      '--rm',
-      '--name', containerId,
-      '--memory', this.config.memoryLimit,
-      '--cpus', String(this.config.cpuLimit),
-      '--network', this.config.networkMode,
-      '--read-only',
-      '--tmpfs', '/tmp:size=64m',
-      '--pids-limit', '64',
-    ];
-
-    // Add environment variables
-    if (request.environment) {
-      for (const [key, value] of Object.entries(request.environment)) {
-        cmd.push('-e', `${key}=${value}`);
-      }
-    }
-
-    cmd.push(image);
-
-    // Add execution command based on language
-    switch (request.language) {
-      case 'python':
-        cmd.push('python', '-c', request.code);
-        break;
-      case 'javascript':
-        cmd.push('node', '-e', request.code);
-        break;
-      case 'bash':
-        cmd.push('bash', '-c', request.code);
-        break;
-      default:
-        cmd.push('sh', '-c', request.code);
-    }
-
-    return cmd;
-  }
-
-  /** Stop a container */
-  private async stopContainer(containerId: string): Promise<void> {
-    const container = this.containers.get(containerId);
-    if (container) {
-      container.status = 'stopped';
-      // docker stop would go here
-    }
-  }
-
-  /** Clean up container resources */
-  private async cleanupContainer(containerId: string): Promise<void> {
-    this.containers.delete(containerId);
+  /**
+   * Execute a command in the sandbox (public API for other features).
+   */
+  async execute(command: string, overrides?: Partial<SandboxConfig>): Promise<SandboxResult> {
+    return runInSandbox(command, { ...this.config, ...overrides });
   }
 }
 

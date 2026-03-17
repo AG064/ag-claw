@@ -1,219 +1,229 @@
 #!/usr/bin/env bash
 # ============================================
-# AG-Claw Installation Script
+# AG-Claw Installer
 # ============================================
 set -euo pipefail
 
+# ─── Colors ──────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+BOLD='\033[1m'
+NC='\033[0m'
 
-REPO_URL="https://github.com/AG064/ag-claw.git"
+# ─── Defaults ────────────────────────────────
 INSTALL_DIR="${AGCLAW_DIR:-$(pwd)}"
 USE_DOCKER=false
 
-# Parse arguments
+# ─── Parse args ──────────────────────────────
 for arg in "$@"; do
   case $arg in
-    --docker)
-      USE_DOCKER=true
-      shift
-      ;;
-    --dir=*)
-      INSTALL_DIR="${arg#*=}"
-      shift
-      ;;
-    --help)
-      echo "AG-Claw Installer"
+    --docker)    USE_DOCKER=true; shift ;;
+    --dir=*)     INSTALL_DIR="${arg#*=}"; shift ;;
+    --help|-h)
+      echo -e "${BOLD}AG-Claw Installer${NC}"
       echo ""
       echo "Usage: ./install.sh [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --docker       Deploy using Docker Compose"
-      echo "  --dir=PATH     Install to specified directory"
-      echo "  --help         Show this help message"
+      echo "  --docker       Deploy with Docker Compose"
+      echo "  --dir=PATH     Install directory (default: current)"
+      echo "  --help         Show this help"
       echo ""
-      echo "Environment variables:"
+      echo "Env vars:"
       echo "  AGCLAW_DIR     Installation directory"
       exit 0
       ;;
   esac
 done
 
+# ─── Helpers ─────────────────────────────────
 log_info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_ok()    { echo -e "${GREEN}[  OK]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ ERR]${NC} $1"; }
+log_error() { echo -e "${RED}[ERR ]${NC} $1"; }
+log_step()  { echo -e "${BOLD}${BLUE}==> $1${NC}"; }
 
+# ─── Banner ──────────────────────────────────
 echo ""
 echo -e "${BLUE}╔═══════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║       AG-Claw Installer v0.1.0        ║${NC}"
-echo -e "${BLUE}║   Modular AI Agent Framework          ║${NC}"
+echo -e "${BLUE}║        AG-Claw Installer v0.2.0       ║${NC}"
+echo -e "${BLUE}║    Modular AI Agent Framework         ║${NC}"
 echo -e "${BLUE}╚═══════════════════════════════════════╝${NC}"
 echo ""
 
 # ============================================
-# Step 1: Check prerequisites
+# Step 1: Prerequisites
 # ============================================
-log_info "Checking prerequisites..."
+log_step "Checking prerequisites"
 
-# Check Node.js
-if command -v node &> /dev/null; then
-  NODE_VERSION=$(node -v | sed 's/v//')
-  NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
+# Node.js >= 20
+if command -v node &>/dev/null; then
+  NODE_VER=$(node -v | sed 's/v//')
+  NODE_MAJOR=$(echo "$NODE_VER" | cut -d. -f1)
   if [ "$NODE_MAJOR" -ge 20 ]; then
-    log_ok "Node.js $NODE_VERSION found"
+    log_ok "Node.js v${NODE_VER}"
   else
-    log_error "Node.js >= 20 required (found $NODE_VERSION)"
-    log_info "Install with: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
+    log_error "Node.js >= 20 required (found v${NODE_VER})"
     exit 1
   fi
 else
-  log_error "Node.js not found. Install Node.js >= 20 first."
-  log_info "  Ubuntu/Debian: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
-  log_info "  macOS: brew install node"
-  log_info "  Or visit: https://nodejs.org"
+  log_error "Node.js not found"
+  log_info "Install: https://nodejs.org or use nvm/fnm"
   exit 1
 fi
 
-# Check npm
-if command -v npm &> /dev/null; then
-  log_ok "npm $(npm -v) found"
+# npm
+if command -v npm &>/dev/null; then
+  log_ok "npm v$(npm -v)"
 else
-  log_error "npm not found (should come with Node.js)"
+  log_error "npm not found"
   exit 1
 fi
 
-# Check Docker (only if --docker flag)
+# Docker (only needed for --docker)
 if [ "$USE_DOCKER" = true ]; then
-  if command -v docker &> /dev/null; then
-    log_ok "Docker $(docker --version | awk '{print $3}' | tr -d ',') found"
+  if command -v docker &>/dev/null; then
+    DOCKER_VER=$(docker --version | grep -oP '\d+\.\d+\.\d+' | head -1)
+    log_ok "Docker ${DOCKER_VER}"
   else
-    log_error "Docker not found. Install Docker first: https://docs.docker.com/get-docker/"
+    log_error "Docker not found. Install: https://docs.docker.com/get-docker/"
     exit 1
   fi
 
-  if command -v docker compose &> /dev/null || command -v docker-compose &> /dev/null; then
-    log_ok "Docker Compose found"
+  if docker compose version &>/dev/null || command -v docker-compose &>/dev/null; then
+    log_ok "Docker Compose available"
   else
-    log_error "Docker Compose not found."
+    log_error "Docker Compose not found"
     exit 1
   fi
 fi
 
 # ============================================
-# Step 2: Navigate to install directory
+# Step 2: Navigate to directory
 # ============================================
+log_step "Setting up directory"
+
 if [ ! -d "$INSTALL_DIR" ]; then
-  log_info "Creating install directory: $INSTALL_DIR"
   mkdir -p "$INSTALL_DIR"
+  log_info "Created: $INSTALL_DIR"
 fi
 
 cd "$INSTALL_DIR"
-log_ok "Working directory: $(pwd)"
+log_ok "Working in: $(pwd)"
 
 # ============================================
 # Step 3: Install dependencies
 # ============================================
-log_info "Installing npm dependencies..."
-npm install --production 2>/dev/null || npm install
+log_step "Installing dependencies"
+
+if [ -f "package-lock.json" ]; then
+  npm ci --ignore-scripts 2>/dev/null || npm install
+else
+  npm install
+fi
 log_ok "Dependencies installed"
 
 # ============================================
-# Step 4: Copy default config if not exists
+# Step 4: Configuration
 # ============================================
-if [ ! -f "config/default.yaml" ]; then
-  log_info "Creating default configuration..."
-  mkdir -p config
-  if [ -f "config/default.yaml" ]; then
-    log_warn "config/default.yaml already exists, skipping"
-  else
-    log_ok "Configuration ready (config/default.yaml)"
-  fi
+log_step "Configuring"
+
+# Default config
+if [ -f "config/default.yaml" ]; then
+  log_ok "config/default.yaml exists"
 else
-  log_ok "Configuration already exists"
+  log_warn "config/default.yaml missing — check repo"
 fi
 
-if [ ! -f "config/security-policy.yaml" ]; then
-  log_info "Creating default security policy..."
-  log_ok "Security policy ready (config/security-policy.yaml)"
+# Security policy
+if [ -f "config/security-policy.yaml" ]; then
+  log_ok "config/security-policy.yaml exists"
 else
-  log_ok "Security policy already exists"
+  log_warn "config/security-policy.yaml missing — check repo"
 fi
 
-# ============================================
-# Step 5: Create data directories
-# ============================================
-log_info "Creating data directories..."
-mkdir -p data memory logs
-log_ok "Data directories created (data/, memory/, logs/)"
-
-# Create .env if not exists
+# .env file
 if [ ! -f ".env" ]; then
-  cat > .env << 'ENVEOF'
+  cat > .env << 'EOF'
 # AG-Claw Environment Variables
-# Copy this file and fill in your values.
+# ──────────────────────────────
 
-# Telegram Bot Token (get from @BotFather)
+# Telegram Bot (get token from @BotFather)
 # AGCLAW_TELEGRAM_TOKEN=
 
-# Model API Keys (or use OpenRouter)
+# OpenRouter API (unified model access)
 # OPENROUTER_API_KEY=
 
-# ElevenLabs (for voice features)
+# ElevenLabs (voice features)
 # ELEVENLABS_API_KEY=
 
-# Supabase (optional, for Supabase memory backend)
+# Master key for encrypted secrets
+# AGCLAW_MASTER_KEY=
+
+# Supabase (optional cloud memory)
 # AGCLAW_SUPABASE_URL=
 # AGCLAW_SUPABASE_KEY=
 
-# Logging level
+# Logging
 AGCLAW_LOG_LEVEL=info
 
-# Port override
+# Port
 # AGCLAW_PORT=18789
-ENVEOF
-  log_ok ".env template created (fill in your API keys)"
+EOF
+  log_ok ".env template created"
 else
   log_ok ".env already exists"
 fi
 
 # ============================================
-# Step 6: Build TypeScript
+# Step 5: Create directories
 # ============================================
-log_info "Building TypeScript..."
+log_step "Creating data directories"
+
+mkdir -p data memory logs data/workspace
+log_ok "data/, memory/, logs/, data/workspace/ ready"
+
+# ============================================
+# Step 6: Build
+# ============================================
+log_step "Building TypeScript"
+
 if npm run build 2>/dev/null; then
-  log_ok "TypeScript build complete"
+  log_ok "Build complete"
 else
-  log_warn "TypeScript build failed — you may need to fix compilation errors"
-  log_info "Run 'npm run build' manually to see details"
+  log_warn "Build had errors — run 'npm run build' to see details"
 fi
 
 # ============================================
-# Step 7: Start with Docker (if --docker)
+# Step 7: Docker deployment (optional)
 # ============================================
 if [ "$USE_DOCKER" = true ]; then
-  log_info "Starting with Docker Compose..."
-  docker compose -f docker/docker-compose.yml up -d
-  log_ok "AG-Claw is running in Docker"
-  echo ""
-  log_info "Access: http://localhost:18789"
-  log_info "Logs:   docker compose -f docker/docker-compose.yml logs -f"
-  log_info "Stop:   docker compose -f docker/docker-compose.yml down"
+  log_step "Starting Docker deployment"
+
+  if docker compose -f docker/docker-compose.yml up -d 2>/dev/null || \
+     docker-compose -f docker/docker-compose.yml up -d 2>/dev/null; then
+    log_ok "AG-Claw running in Docker"
+    echo ""
+    log_info "Gateway: http://localhost:18789"
+    log_info "Webchat: http://localhost:3001"
+    log_info "Logs:    docker compose -f docker/docker-compose.yml logs -f"
+    log_info "Stop:    docker compose -f docker/docker-compose.yml down"
+  else
+    log_error "Docker Compose failed"
+    exit 1
+  fi
 else
   echo ""
-  log_ok "Installation complete!"
+  echo -e "${GREEN}${BOLD}Installation complete!${NC}"
   echo ""
-  echo -e "${BLUE}Next steps:${NC}"
+  echo -e "${BOLD}Next steps:${NC}"
   echo -e "  1. Edit ${YELLOW}.env${NC} with your API keys"
   echo -e "  2. Review ${YELLOW}config/default.yaml${NC}"
-  echo -e "  3. Start AG-Claw:"
-  echo -e "     ${GREEN}npm start${NC}         (production)"
-  echo -e "     ${GREEN}npm run dev${NC}       (development with hot-reload)"
-  echo -e "     ${GREEN}./install.sh --docker${NC}  (Docker deployment)"
-  echo ""
-  echo -e "  Docs: ${BLUE}https://github.com/AG064/ag-claw${NC}"
+  echo -e "  3. Run AG-Claw:"
+  echo -e "     ${GREEN}npm start${NC}              production"
+  echo -e "     ${GREEN}npm run dev${NC}            development"
+  echo -e "     ${GREEN}./install.sh --docker${NC}  Docker"
   echo ""
 fi
