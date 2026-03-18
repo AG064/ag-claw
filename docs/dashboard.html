@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AG-Claw — Dashboard</title>
+<style>
+  :root{--bg:#0b0f1a;--panel:#0f1724;--muted:#9aa4b2;--accent:#66d9ff;--card:#0b1220}
+  *{box-sizing:border-box;font-family:Inter,Segoe UI,Roboto,system-ui,-apple-system}
+  body{margin:0;background:linear-gradient(180deg,#07090e 0%, #0b0f1a 100%);color:#e6eef6}
+  .app{display:flex;min-height:100vh}
+  .sidebar{width:220px;background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);border-right:1px solid rgba(255,255,255,0.03);padding:24px}
+  .brand{font-weight:700;font-size:18px;margin-bottom:18px;display:flex;align-items:center;gap:10px}
+  .nav{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+  .nav a{color:var(--muted);text-decoration:none;padding:10px;border-radius:8px;display:flex;align-items:center;gap:10px}
+  .nav a.active{background:rgba(102,217,255,0.08);color:var(--accent)}
+  .main{flex:1;padding:28px}
+  .row{display:flex;gap:18px;flex-wrap:wrap}
+  .card{background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));padding:18px;border-radius:12px;min-width:220px;flex:1;color:#d7e9f6;border:1px solid rgba(255,255,255,0.03)}
+  .card h3{margin:0 0 8px 0;font-size:14px;color:#cfeeff}
+  .small{font-size:12px;color:var(--muted)}
+  .big{font-size:28px;font-weight:700;margin-top:6px}
+  .grid{margin-top:18px;background:linear-gradient(180deg,#061226 0%,#071428 100%);padding:12px;border-radius:12px;border:1px solid rgba(255,255,255,0.02)}
+  .map{width:100%;height:320px;background:repeating-linear-gradient(90deg,rgba(255,255,255,0.02) 0 1px,transparent 1px 40px),repeating-linear-gradient(0deg,rgba(255,255,255,0.02) 0 1px,transparent 1px 40px);border-radius:8px}
+  footer{margin-top:24px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">OMEGA · AG-Claw</div>
+    <nav class="nav">
+      <a href="#" class="active">Dashboard</a>
+      <a href="#">Nodes</a>
+      <a href="#">Skills</a>
+      <a href="#">Analytics</a>
+      <a href="#">Settings</a>
+    </nav>
+    <div style="margin-top:18px;font-size:13px;color:var(--muted)">Status: <strong style="color:#7ef3ff">Online</strong></div>
+  </aside>
+  <main class="main">
+    <div class="row">
+      <div class="card" style="max-width:360px">
+        <h3>System Status</h3>
+        <div class="small">Uptime</div>
+        <div class="big" id="uptime">—</div>
+        <div style="margin-top:10px" class="small">Version: 0.2.0</div>
+      </div>
+      <div class="card" style="max-width:260px">
+        <h3>Active Sessions</h3>
+        <div class="big" id="sessions">0</div>
+        <div class="small">Realtime connected clients</div>
+      </div>
+      <div class="card" style="max-width:260px">
+        <h3>API Limits</h3>
+        <div class="big" id="apiLimits">—</div>
+        <div class="small">Requests / min</div>
+      </div>
+      <div class="card" style="max-width:260px">
+        <h3>Memory Usage</h3>
+        <div class="big" id="mem">—</div>
+        <div class="small">RSS / Heap</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <h3>Node Map</h3>
+      <div class="map" id="nodeMap">
+        <!-- SVG canvas placeholder -->
+        <svg width="100%" height="100%" viewBox="0 0 800 400" preserveAspectRatio="xMidYMid meet">
+          <defs>
+            <style>.g{fill:#0b2133;stroke:#11324a;stroke-width:1}</style>
+          </defs>
+          <rect width="100%" height="100%" class="g" />
+        </svg>
+      </div>
+    </div>
+
+    <footer>AG-Claw • Internal Dashboard — Mockup</footer>
+  </main>
+</div>
+<script>
+function fmtBytes(b){if(!b) return '—'; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'}
+function refresh(){
+  document.getElementById('uptime').textContent = Math.floor(performance.now()/1000)+'s';
+  document.getElementById('sessions').textContent = Math.floor(Math.random()*8).toString();
+  document.getElementById('apiLimits').textContent = Math.floor(Math.random()*500)+' / min';
+  document.getElementById('mem').textContent = fmtBytes(Math.floor(Math.random()*200000000));
+}
+setInterval(refresh,2000);refresh();
+</script>
+</body>
+</html>
