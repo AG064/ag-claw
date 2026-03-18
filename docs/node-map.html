@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AG-Claw • Node Map</title>
+<style>
+  :root{
+    --bg:#0b0f1a;--panel:#0f1724;--muted:#9aa4b2;--accent:#66d9ff;--card:#0b1220;
+    --comm:#3b82f6;--mem:#22c55e;--auto:#f97316;--sec:#ef4444;--daily:#a855f7;--col:#eab308;--creat:#ec4899;--plat:#6b7280;
+  }
+  *{box-sizing:border-box;font-family:Inter,Segoe UI,Roboto,system-ui,-apple-system}
+  body{margin:0;background:linear-gradient(180deg,#07090e 0%,#0b0f1a 100%);color:#e6eef6;overflow:hidden}
+  .app{display:flex;min-height:100vh}
+  .sidebar{width:260px;background:rgba(255,255,255,0.02);border-right:1px solid rgba(255,255,255,0.03);padding:24px;display:flex;flex-direction:column}
+  .brand{font-weight:700;font-size:18px;margin-bottom:24px;display:flex;align-items:center;gap:10px;color:#66d9ff}
+  .nav{display:flex;flex-direction:column;gap:4px;margin-bottom:24px}
+  .nav a{color:var(--muted);text-decoration:none;padding:10px 12px;border-radius:8px;display:flex;align-items:center;gap:10px;font-size:14px;transition:.2s}
+  .nav a.active{background:rgba(102,217,255,0.1);color:var(--accent)}
+  .legend{display:flex;flex-direction:column;gap:8px;margin-top:auto}
+  .legend-item{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+  .legend-dot{width:12px;height:12px;border-radius:50%}
+  .main{flex:1;position:relative;overflow:hidden}
+  #graph{width:100%;height:100%;cursor:grab}
+  #graph:active{cursor:grabbing}
+  .node{cursor:pointer;transition:filter .2s}
+  .node:hover{filter:brightness(1.3)}
+  .node.highlighted{filter:brightness(1.5) drop-shadow(0 0 8px currentColor}
+  .edge{stroke:rgba(255,255,255,0.15);stroke-width:1.5;fill:none;marker-end:url(#arrow)}
+  .edge.highlighted{stroke:rgba(102,217,255,0.6);stroke-width:2.5}
+  #info{position:absolute;top:20px;right:20px;width:300px;background:rgba(15,23,36,0.95);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:18px;transform:translateX(120%);transition:transform .3s cubic-bezier(.25,.8,.25,1)}
+  #info.visible{transform:translateX(0)}
+  #info h2{margin:0 0 8px 0;font-size:16px;color:var(--accent);display:flex;align-items:center;gap:8px}
+  #info .meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  #info .tag{font-size:11px;padding:4px 8px;border-radius:6px;background:rgba(255,255,255,0.05);color:var(--muted);border:1px solid rgba(255,255,255,0.08)}
+  #info .desc{font-size:13px;line-height:1.6;color:#b8c6db}
+  #info .dep-list{margin-top:12px;font-size:12px;color:var(--muted)}
+  #info .dep-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+  #info .dep-dot{width:8px;height:8px;border-radius:50%}
+  #close{position:absolute;top:12px;right:12px;background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:4px}
+  #close:hover{color:#fff}
+  #controls{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:12px;background:rgba(15,23,36,0.9);padding:10px 16px;border-radius:12px;border:1px solid rgba(255,255,255,0.08)}
+  .ctrl-btn{background:none;border:1px solid rgba(255,255,255,0.15);color:var(--muted);padding:8px 16px;border-radius:8px;cursor:pointer;font-size:13px;transition:.2s}
+  .ctrl-btn:hover{background:rgba(255,255,255,0.05);color:#fff;border-color:rgba(255,255,255,0.3)}
+  #zoom{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted);display:flex;align-items:center}
+  .status{position:absolute;top:20px;left:20px;font-size:12px;color:var(--muted);background:rgba(15,23,36,0.9);padding:8px 12px;border-radius:8px}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  .node{animation:fadeIn .5s ease backwards}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">🌐 AG-Claw</div>
+    <nav class="nav">
+      <a href="../dashboard.html">Dashboard</a>
+      <a href="#" class="active">Node Map</a>
+      <a href="#">Skills</a>
+      <a href="#">Analytics</a>
+      <a href="#">Settings</a>
+    </nav>
+    <div class="legend" id="legend"></div>
+  </aside>
+  <main class="main">
+    <svg id="graph" viewBox="0 0 2000 1200" preserveAspectRatio="xMidYMid meet">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255,255,255,0.15)"/>
+        </marker>
+        <filter id="glow"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      <g id="edges"></g>
+      <g id="nodes"></g>
+    </svg>
+    <div class="status" id="status">Drag nodes • Scroll to zoom</div>
+    <div id="info">
+      <button id="close">×</button>
+      <h2 id="infoTitle">Feature</h2>
+      <div class="meta" id="infoMeta"></div>
+      <div class="desc" id="infoDesc"></div>
+      <div class="dep-list" id="infoDeps"></div>
+    </div>
+    <div id="controls">
+      <button class="ctrl-btn" onclick="resetView()">Reset</button>
+      <button class="ctrl-btn" onclick="fitToScreen()">Fit</button>
+      <button class="ctrl-btn" onclick="togglePhysics()">Physics</button>
+      <div id="zoom">100%</div>
+    </div>
+  </main>
+</div>
+<script>
+// ─── Data ─────────────────────────────────────────────────────────────────────
+
+const categories = {
+  communication: { name: 'Communication', color: '#3b82f6', css: '--comm' },
+  memory: { name: 'Memory', color: '#22c55e', css: '--mem' },
+  automation: { name: 'Automation', color: '#f97316', css: '--auto' },
+  security: { name: 'Security', color: '#ef4444', css: '--sec' },
+  daily: { name: 'Daily', color: '#a855f7', css: '--daily' },
+  collaboration: { name: 'Collaboration', color: '#eab308', css: '--col' },
+  creative: { name: 'Creative', color: '#ec4899', css: '--creat' },
+  platform: { name: 'Platform', color: '#6b7280', css: '--plat' }
+};
+
+const features = [
+  // Communication
+  { id: 'webchat', name: 'WebChat', ver: '0.2.0', cat: 'communication', desc: 'Full-featured web UI with Markdown, file upload, WebSocket messaging, dark/light themes.', status: 'stable' },
+  { id: 'telegram', name: 'Telegram', ver: '0.1.5', cat: 'communication', desc: 'Telegram bot integration with command handling, inline queries, and media support.', status: 'stable' },
+  { id: 'webhooks', name: 'WebHooks', ver: '0.1.0', cat: 'communication', desc: 'Incoming webhook receiver for external integrations with signature verification.', status: 'beta' },
+  { id: 'group-management', name: 'Group Mgmt', ver: '0.1.2', cat: 'communication', desc: 'Manage multiple user groups, permissions, and shared workspaces.', status: 'beta' },
+
+  // Memory
+  { id: 'knowledge-graph', name: 'Knowledge Graph', ver: '0.2.0', cat: 'memory', desc: 'Entity-relationship graph with Markdown/JSON import, BFS pathfinding, SQLite + memory backends.', status: 'stable' },
+  { id: 'multimodal-memory', name: 'Multimodal Memory', ver: '0.1.0', cat: 'memory', desc: 'Cross-modal memory storage (text, images, audio, docs) with semantic search and importance-based retention.', status: 'beta' },
+  { id: 'auto-capture', name: 'Auto Capture', ver: '0.0.4', cat: 'memory', desc: 'Automatic context capture from chats, files, and external sources into memory.', status: 'alpha' },
+
+  // Automation
+  { id: 'container-sandbox', name: 'Container Sandbox', ver: '0.1.0', cat: 'automation', desc: 'Execute code in isolated Docker containers with resource limits and timeout control.', status: 'beta' },
+  { id: 'browser-automation', name: 'Browser Automation', ver: '0.0.3', cat: 'automation', desc: 'Headless browser control with Puppeteer for web scraping and automation.', status: 'alpha' },
+  { id: 'mesh-workflows', name: 'Mesh Workflows', ver: '0.0.5', cat: 'automation', desc: 'Visual workflow designer with branching, loops, and parallel execution.', status: 'alpha' },
+  { id: 'task-checkout', name: 'Task Checkout', ver: '0.1.1', cat: 'automation', desc: 'Turn tasks into working features with bounded scope and git branching.', status: 'beta' },
+  { id: 'goals', name: 'Goals', ver: '0.1.3', cat: 'automation', desc: 'Goal tracking with milestones, progress metrics, and adaptive planning.', status: 'beta' },
+  { id: 'checkpoint', name: 'Checkpoint', ver: '0.0.2', cat: 'automation', desc: 'State persistence and recovery for long-running tasks and workflows.', status: 'alpha' },
+
+  // Security
+  { id: 'air-gapped', name: 'Air-Gapped', ver: '0.0.1', cat: 'security', desc: 'Offline operation mode with no external network connections. Data stays local.', status: 'alpha' },
+  { id: 'governance', name: 'Governance', ver: '0.1.0', cat: 'security', desc: 'Audit trails, access controls, policy enforcement, and compliance logging.', status: 'beta' },
+
+  // Daily
+  { id: 'morning-briefing', name: 'Morning Briefing', ver: '0.1.0', cat: 'daily', desc: 'Personalized daily briefing with weather, calendar, news, tasks, and insights.', status: 'beta' },
+  { id: 'evening-recap', name: 'Evening Recap', ver: '0.0.3', cat: 'daily', desc: 'End-of-day summary of accomplishments, learnings, and tomorrow\'s plan.', status: 'alpha' },
+  { id: 'life-domains', name: 'Life Domains', ver: '0.0.4', cat: 'daily', desc: 'Track and balance different life areas (health, career, relationships, growth).', status: 'alpha' },
+
+  // Collaboration
+  { id: 'skills-library', name: 'Skills Library', ver: '0.2.1', cat: 'collaboration', desc: 'Central repository for discovering, installing, and sharing agent skills from ClawHub.', status: 'stable' },
+  { id: 'company-templates', name: 'Company Templates', ver: '0.0.1', cat: 'collaboration', desc: 'Shared organization templates for consistent workflows and documentation.', status: 'alpha' },
+
+  // Creative
+  { id: 'live-canvas', name: 'Live Canvas', ver: '0.1.0', cat: 'creative', desc: 'Real-time collaborative whiteboard with drawing, shapes, and embedded media.', status: 'beta' },
+  { id: 'voice', name: 'Voice', ver: '0.0.2', cat: 'creative', desc: 'Voice input/output with speech recognition, synthesis, and voice commands.', status: 'alpha' },
+
+  // Platform
+  { id: 'budget', name: 'Budget', ver: '0.0.2', cat: 'platform', desc: 'Track API usage, costs, and resource consumption across features.', status: 'alpha' },
+  { id: 'consolidation', name: 'Consolidation', ver: '0.0.1', cat: 'platform', desc: 'Data aggregation and reporting from multiple sources into unified views.', status: 'alpha' },
+  { id: 'smart-recommendations', name: 'Smart Recs', ver: '0.0.2', cat: 'platform', desc: 'AI-powered suggestions for features, actions, and optimizations based on usage patterns.', status: 'alpha' }
+];
+
+const edges = [
+  // WebChat sends messages to webhooks
+  { from: 'webchat', to: 'webhooks', type: 'triggers' },
+
+  // Webhook events can trigger automation
+  { from: 'webhooks', to: 'mesh-workflows', type: 'invokes' },
+
+  // Knowledge graph stores entities from memory
+  { from: 'multimodal-memory', to: 'knowledge-graph', type: 'feeds' },
+
+  // Auto-capture stores into multimodal memory
+  { from: 'auto-capture', to: 'multimodal-memory', type: 'writes' },
+
+  // Task checkout uses goals and knowledge graph for context
+  { from: 'task-checkout', to: 'goals', type: 'aligns' },
+  { from: 'task-checkout', to: 'knowledge-graph', type: 'references' },
+
+  // Goals structured by life domains
+  { from: 'life-domains', to: 'goals', type: 'organizes' },
+
+  // Morning briefing pulls from calendar, tasks, insights (via various features)
+  { from: 'morning-briefing', to: 'multimodal-memory', type: 'reads' },
+
+  // Evening recap similar
+  { from: 'evening-recap', to: 'multimodal-memory', type: 'reads' },
+
+  // Group management integrates with webchat
+  { from: 'webchat', to: 'group-management', type: 'uses' },
+
+  // Skills library discovers skills
+  { from: 'skills-library', to: 'knowledge-graph', type: 'registers' },
+
+  // Live canvas stores memories
+  { from: 'live-canvas', to: 'multimodal-memory', type: 'saves' },
+
+  // Container sandbox enables automation tasks
+  { from: 'container-sandbox', to: 'task-checkout', type: 'powers' },
+
+  // Browser automation extends webchat capabilities
+  { from: 'browser-automation', to: 'webchat', type: 'enhances' },
+
+  // Smart recommendations use knowledge graph
+  { from: 'smart-recommendations', to: 'knowledge-graph', type: 'analyzes' },
+
+  // Governance audits webhooks and auto-capture
+  { from: 'governance', to: 'webhooks', type: 'monitors' },
+  { from: 'governance', to: 'auto-capture', type: 'audits' },
+
+  // Budget tracks usage across features
+  { from: 'budget', to: 'container-sandbox', type: 'tracks' },
+  { from: 'budget', to: 'smart-recommendations', type: 'informs' },
+
+  // Consolidation aggregates reporting
+  { from: 'consolidation', to: 'smart-recommendations', type: 'feeds' },
+
+  // Voice integration with multimodal memory
+  { from: 'voice', to: 'multimodal-memory', type: 'transcribes' },
+
+  // Mesh workflows can use container sandbox
+  { from: 'mesh-workflows', to: 'container-sandbox', type: 'executes' },
+
+  // Checkpoint supports task-checkout
+  { from: 'checkpoint', to: 'task-checkout', type: 'persists' },
+
+  // Company templates use knowledge graph
+  { from: 'company-templates', to: 'knowledge-graph', type: 'templates' }
+];
+
+// ─── Force-directed layout ───────────────────────────────────────────────────
+
+const width = 2000, height = 1200;
+const nodes = features.map(f => ({
+  ...f,
+  x: Math.random() * width,
+  y: Math.random() * height,
+  vx: 0, vy: 0,
+  radius: 28 + (f.cat === 'communication' ? 0 : f.cat === 'memory' ? -2 : f.cat === 'automation' ? 2 : 0)
+}));
+
+const edgesList = edges.map(e => ({
+  from: nodes.find(n => n.id === e.from)!,
+  to: nodes.find(n => n.id === e.to)!,
+  type: e.type
+})).filter(e => e.from && e.to);
+
+const simulation = {
+  running: true,
+  alpha: 1,
+  alphaDecay: 0.0228,
+  velocityDecay: 0.4,
+  forces: {
+    repulsion: -800,
+    attraction: 0.08,
+    centering: 0.02,
+    damping: 0.9
+  }
+};
+
+function forceSimulation(iterations = 300) {
+  for (let i = 0; i < iterations; i++) {
+    // Repulsion (Coulomb)
+    for (let a = 0; a < nodes.length; a++) {
+      for (let b = a + 1; b < nodes.length; b++) {
+        const dx = nodes[b].x - nodes[a].x;
+        const dy = nodes[b].y - nodes[a].y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const force = simulation.forces.repulsion / (dist * dist);
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+        nodes[a].vx -= fx;
+        nodes[a].vy -= fy;
+        nodes[b].vx += fx;
+        nodes[b].vy += fy;
+      }
+    }
+
+    // Attraction (Hooke)
+    for (const edge of edgesList) {
+      const dx = edge.to.x - edge.from.x;
+      const dy = edge.to.y - edge.from.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const force = (dist - 150) * simulation.forces.attraction;
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+      edge.from.vx += fx;
+      edge.from.vy += fy;
+      edge.to.vx -= fx;
+      edge.to.vy -= fy;
+    }
+
+    // Centering
+    const cx = width / 2, cy = height / 2;
+    for (const node of nodes) {
+      node.vx += (cx - node.x) * simulation.forces.centering;
+      node.vy += (cy - node.y) * simulation.forces.centering;
+    }
+
+    // Update positions with velocity and damping
+    for (const node of nodes) {
+      node.vx *= simulation.forces.damping;
+      node.vy *= simulation.forces.damping;
+      node.x += node.vx;
+      node.y += node.vy;
+
+      // Bounds
+      const pad = node.radius + 5;
+      if (node.x < pad) { node.x = pad; node.vx *= -0.5; }
+      if (node.x > width - pad) { node.x = width - pad; node.vx *= -0.5; }
+      if (node.y < pad) { node.y = pad; node.vy *= -0.5; }
+      if (node.y > height - pad) { node.y = height - pad; node.vy *= -0.5; }
+    }
+  }
+}
+
+// ─── Rendering ───────────────────────────────────────────────────────────────
+
+const svg = document.getElementById('graph');
+const nodesGroup = document.getElementById('nodes');
+const edgesGroup = document.getElementById('edges');
+const infoPanel = document.getElementById('info');
+const zoomDisplay = document.getElementById('zoom');
+
+let scale = 0.6, translateX = 0, translateY = 0;
+let isDragging = false, dragNode = null, dragStart = { x: 0, y: 0 };
+let hoveredNode = null, highlightedNodes = new Set();
+
+// Build legend
+const legendContainer = document.getElementById('legend');
+for (const [key, cat] of Object.entries(categories)) {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  item.innerHTML = `<div class="legend-dot" style="background:${cat.color}"></div><span>${cat.name}</span>`;
+  legendContainer.appendChild(item);
+}
+
+// Precompute layout
+forceSimulation(500);
+
+// Render edges
+edgesList.forEach((edge, i) => {
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('class', 'edge');
+  line.setAttribute('id', `edge-${i}`);
+  line.dataset.from = edge.from.id;
+  line.dataset.to = edge.to.id;
+  edgesGroup.appendChild(line);
+});
+
+// Render nodes
+nodes.forEach((node, i) => {
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  g.setAttribute('class', 'node');
+  g.setAttribute('id', `node-${node.id}`);
+  g.dataset.id = node.id;
+  g.style.animationDelay = `${i * 30}ms`;
+
+  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  circle.setAttribute('r', node.radius);
+  circle.setAttribute('fill', categories[node.cat].color);
+  circle.setAttribute('stroke', 'rgba(255,255,255,0.2)');
+  circle.setAttribute('stroke-width', '2');
+
+  const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  text.setAttribute('dy', node.radius + 16);
+  text.setAttribute('text-anchor', 'middle');
+  text.setAttribute('fill', '#e6eef6');
+  text.setAttribute('font-size', '12');
+  text.setAttribute('font-weight', '500');
+  text.textContent = node.name;
+
+  g.appendChild(circle);
+  g.appendChild(text);
+  nodesGroup.appendChild(g);
+
+  // Event listeners
+  g.addEventListener('mousedown', (e) => startDrag(e, node));
+  g.addEventListener('click', (e) => showInfo(node, e));
+  g.addEventListener('mouseenter', () => highlightConnections(node));
+  g.addEventListener('mouseleave', () => clearHighlight());
+});
+
+// ─── Interaction ────────────────────────────────────────────────────────────
+
+function startDrag(e, node) {
+  isDragging = true;
+  dragNode = node;
+  const point = getSVGPoint(e);
+  dragStart = { x: point.x - node.x, y: point.y - node.y };
+  svg.style.cursor = 'grabbing';
+}
+
+svg.addEventListener('mousemove', (e) => {
+  if (isDragging && dragNode) {
+    const pt = getSVGPoint(e);
+    dragNode.x = pt.x - dragStart.x;
+    dragNode.y = pt.y - dragStart.y;
+    updateEdges();
+  } else if (hoveredNode) {
+    const pt = getSVGPoint(e);
+    // Pan
+    translateX += pt.x - (prevX ?? pt.x);
+    translateY += pt.y - (prevY ?? pt.y);
+    prevX = pt.x; prevY = pt.y;
+    updateTransform();
+  }
+});
+
+let prevX, prevY;
+svg.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1;
+  scale = Math.max(0.2, Math.min(2, scale * zoomFactor));
+  zoomDisplay.textContent = Math.round(scale * 100) + '%';
+  updateTransform();
+}, { passive: false });
+
+svg.addEventListener('mousedown', (e) => {
+  if (e.target === svg) {
+    isDragging = true;
+    const pt = getSVGPoint(e);
+    prevX = pt.x; prevY = pt.y;
+    hoveredNode = null;
+    svg.style.cursor = 'grabbing';
+  }
+});
+
+svg.addEventListener('mouseup', () => {
+  isDragging = false;
+  dragNode = null;
+  prevX = prevY = null;
+  svg.style.cursor = hoveredNode ? 'pointer' : 'grab';
+});
+
+svg.addEventListener('mouseleave', () => {
+  isDragging = false;
+  prevX = prevY = null;
+});
+
+function getSVGPoint(e) {
+  const pt = svg.createSVGPoint();
+  pt.x = e.clientX;
+  pt.y = e.clientY;
+  return pt.matrixTransform(svg.getScreenCTM()?.inverse());
+}
+
+function updateTransform() {
+  nodesGroup.setAttribute('transform', `translate(${translateX}, ${translateY}) scale(${scale})`);
+  edgesGroup.setAttribute('transform', `translate(${translateX}, ${translateY}) scale(${scale})`);
+}
+
+function updateEdges() {
+  edgesList.forEach((edge, i) => {
+    const line = document.getElementById(`edge-${i}`);
+    line.setAttribute('x1', edge.from.x);
+    line.setAttribute('y1', edge.from.y);
+    line.setAttribute('x2', edge.to.x);
+    line.setAttribute('y2', edge.to.y);
+  });
+}
+
+function highlightConnections(node) {
+  hoveredNode = node;
+  svg.style.cursor = 'pointer';
+  highlightedNodes.clear();
+  highlightedNodes.add(node.id);
+
+  // Find connected nodes
+  edgesList.forEach((edge, i) => {
+    const line = document.getElementById(`edge-${i}`);
+    if (edge.from.id === node.id || edge.to.id === node.id) {
+      highlightedNodes.add(edge.from.id);
+      highlightedNodes.add(edge.to.id);
+      line.classList.add('highlighted');
+    } else {
+      line.style.opacity = '0.1';
+    }
+  });
+
+  // Highlight nodes
+  nodes.forEach(n => {
+    const el = document.getElementById(`node-${n.id}`);
+    if (highlightedNodes.has(n.id)) {
+      el.classList.add('highlighted');
+    } else {
+      el.style.opacity = '0.2';
+    }
+  });
+}
+
+function clearHighlight() {
+  if (hoveredNode) {
+    hoveredNode = null;
+    edgesList.forEach((edge, i) => {
+      const line = document.getElementById(`edge-${i}`);
+      line.classList.remove('highlighted');
+      line.style.opacity = '1';
+    });
+    nodes.forEach(n => {
+      const el = document.getElementById(`node-${n.id}`);
+      el.classList.remove('highlighted');
+      el.style.opacity = '1';
+    });
+  }
+}
+
+// ─── Info Panel ─────────────────────────────────────────────────────────────
+
+function showInfo(node, e) {
+  e.stopPropagation();
+  document.getElementById('infoTitle').innerHTML = `
+    <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${categories[node.cat].color}"></span>
+    ${node.name}
+  `;
+
+  document.getElementById('infoMeta').innerHTML = `
+    <span class="tag">v${node.ver}</span>
+    <span class="tag" style="border-color:${categories[node.cat].color};color:${categories[node.cat].color}">${categories[node.cat].name}</span>
+    <span class="tag">${node.status}</span>
+  `;
+
+  document.getElementById('infoDesc').textContent = node.desc;
+
+  // Dependencies
+  const deps = edgesList.filter(e => e.from.id === node.id || e.to.id === node.id);
+  const depsHtml = deps.map(d => {
+    const other = d.from.id === node.id ? d.to : d.from;
+    const dir = d.from.id === node.id ? '→' : '←';
+    const color = categories[other.cat].color;
+    return `<div class="dep-item"><span class="dep-dot" style="background:${color}"></span>${dir} ${other.name} (${d.type})</div>`;
+  }).join('');
+  document.getElementById('infoDeps').innerHTML = `<strong>Connections (${deps.length}):</strong><br>${depsHtml || '<em>None</em>'}`;
+
+  infoPanel.classList.add('visible');
+}
+
+document.getElementById('close').addEventListener('click', () => {
+  infoPanel.classList.remove('visible');
+});
+
+svg.addEventListener('click', (e) => {
+  if (e.target === svg) {
+    infoPanel.classList.remove('visible');
+  }
+});
+
+// ─── Controls ───────────────────────────────────────────────────────────────
+
+function resetView() {
+  scale = 0.6;
+  translateX = 0;
+  translateY = 0;
+  zoomDisplay.textContent = '60%';
+  updateTransform();
+}
+
+function fitToScreen() {
+  // Calculate bounds
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodes.forEach(n => {
+    minX = Math.min(minX, n.x - n.radius);
+    minY = Math.min(minY, n.y - n.radius);
+    maxX = Math.max(maxX, n.x + n.radius);
+    maxY = Math.max(maxY, n.y + n.radius);
+  });
+
+  const graphW = maxX - minX;
+  const graphH = maxY - minY;
+  const graphCX = (minX + maxX) / 2;
+  const graphCY = (minY + maxY) / 2;
+
+  const viewW = width / scale;
+  const viewH = height / scale;
+  const s = Math.min(viewW / graphW, viewH / graphH) * 0.85;
+  scale = s;
+  translateX = width / 2 - graphCX * s;
+  translateY = height / 2 - graphCY * s;
+  zoomDisplay.textContent = Math.round(scale * 100) + '%';
+  updateTransform();
+}
+
+function togglePhysics() {
+  simulation.running = !simulation.running;
+  if (simulation.running) {
+    document.querySelector('#controls button:nth-child(3)').textContent = 'Pause Physics';
+  } else {
+    document.querySelector('#controls button:nth-child(3)').textContent = 'Resume Physics';
+  }
+}
+
+// Initial render
+updateEdges();
+updateTransform();
+
+// Window resize
+window.addEventListener('resize', () => {
+  // Re-render edges on resize
+  updateEdges();
+});
+
+console.log('Node map loaded: ' + nodes.length + ' features, ' + edgesList.length + ' connections');
+</script>
+</body>
+</html>
