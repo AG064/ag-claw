@@ -188,15 +188,53 @@ function searchLogs(query) {
     const text = line.textContent.toLowerCase();
     if (text.includes(lowerQuery)) {
       line.style.display = '';
-      // Highlight matching text
+      // Highlight matching text without reinterpreting DOM text as HTML
       line.querySelectorAll('.message').forEach((msg) => {
         const content = msg.textContent;
-        if (content.toLowerCase().includes(lowerQuery)) {
-          const regex = new RegExp(`(${query})`, 'gi');
-          msg.innerHTML = content.replace(
-            regex,
-            '<mark style="background: var(--color-warning-muted); color: var(--color-warning);">$1</mark>',
+        const lowerContent = content.toLowerCase();
+        if (!lowerContent.includes(lowerQuery)) {
+          return;
+        }
+
+        // Clear existing content and rebuild with <mark> elements for matches
+        msg.textContent = '';
+
+        const markStyle =
+          'background: var(--color-warning-muted); color: var(--color-warning);';
+        let currentIndex = 0;
+        const queryLength = query.length;
+
+        while (true) {
+          const matchIndex = lowerContent.indexOf(lowerQuery, currentIndex);
+          if (matchIndex === -1) {
+            // Append remaining text (if any)
+            if (currentIndex < content.length) {
+              msg.appendChild(
+                document.createTextNode(content.slice(currentIndex)),
+              );
+            }
+            break;
+          }
+
+          // Append text before the match
+          if (matchIndex > currentIndex) {
+            msg.appendChild(
+              document.createTextNode(
+                content.slice(currentIndex, matchIndex),
+              ),
+            );
+          }
+
+          // Append the matched text inside a <mark> element
+          const markEl = document.createElement('mark');
+          markEl.setAttribute('style', markStyle);
+          markEl.textContent = content.slice(
+            matchIndex,
+            matchIndex + queryLength,
           );
+          msg.appendChild(markEl);
+
+          currentIndex = matchIndex + queryLength;
         }
       });
     } else {
