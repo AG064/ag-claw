@@ -73,7 +73,7 @@ export interface ModelRouterConfig {
   weights?: Partial<ScoringWeights>;
   cacheScoresMs?: number;
   includeDefaultModels?: boolean;
-  defaultWeights: ScoringWeights;
+  defaultWeights?: ScoringWeights;
 }
 
 // ─── Default Weights (15 dimensions) ───────────────────────────────────────
