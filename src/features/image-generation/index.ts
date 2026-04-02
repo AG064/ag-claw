@@ -56,7 +56,7 @@ export interface GenerateImageResult {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const GENERATE_SCRIPT_PATH = join(
-  process.env['HOME'] || '/home/ag064',
+  process.env.HOME || '/home/ag064',
   '.openclaw',
   'workspace',
   'skills',
@@ -178,12 +178,19 @@ class ImageGenerationFeature implements FeatureModule {
       let stdout = '';
       let stderr = '';
       let settled = false;
+      const geminiApiKey = apiKey || process.env.GEMINI_API_KEY;
+      const siliconflowApiKey = fallbackApiKey || process.env.SILICONFLOW_API_KEY;
+
+      if (!geminiApiKey && !siliconflowApiKey) {
+        reject(new Error('GEMINI_API_KEY or SILICONFLOW_API_KEY must be configured'));
+        return;
+      }
 
       const proc = spawn('uv', args, {
         env: {
           ...process.env,
-          GEMINI_API_KEY: apiKey || process.env['GEMINI_API_KEY'] || 'AIzaSyBdp2Ys8yBG4yJYeZ-3V_DKq9Tpm-JDbl4',
-          SILICONFLOW_API_KEY: fallbackApiKey || process.env['SILICONFLOW_API_KEY'],
+          GEMINI_API_KEY: geminiApiKey,
+          SILICONFLOW_API_KEY: siliconflowApiKey,
         },
       });
 

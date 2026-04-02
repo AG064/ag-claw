@@ -285,7 +285,7 @@ function cmdImage(): void {
   print('');
 
   const { spawn } = require('child_process');
-  const homeDir = process.env['HOME'] || '/home/ag064';
+  const homeDir = process.env.HOME || '/home/ag064';
   const scriptPath = `${homeDir}/.openclaw/workspace/skills/image-gen/scripts/generate_image.py`;
 
   const scriptArgs = [
@@ -304,9 +304,15 @@ function cmdImage(): void {
     scriptArgs.push('--input-image', inputImage);
   }
 
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  if (!geminiApiKey) {
+    error('GEMINI_API_KEY is not configured');
+    process.exit(1);
+  }
+
   const env = {
     ...process.env,
-    GEMINI_API_KEY: process.env['GEMINI_API_KEY'] || 'AIzaSyBdp2Ys8yBG4yJYeZ-3V_DKq9Tpm-JDbl4',
+    GEMINI_API_KEY: geminiApiKey,
   };
 
   const start = Date.now();

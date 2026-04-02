@@ -36,8 +36,7 @@
     "docker:build": "docker compose -f docker/docker-compose.yml build",
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
     "docker:down": "docker compose -f docker/docker-compose.yml down",
-    "prebuild": "npm run clean",
-    "postinstall": "node scripts/postinstall-patch.js"
+    "prebuild": "npm run clean"
   },
   "keywords": [
     "ai-agent",
@@ -107,21 +106,9 @@
     "url": "https://github.com/AG064/ag-claw.git"
   },
   "overrides": {
-    "minimatch": "9.0.7",
-    "eslint-plugin-import": {
-      "minimatch": "9.0.0"
-    },
     "undici": "~6.21.0",
     "cross-spawn": "^7.0.6",
     "glob": "^11.0.1",
-    "brace-expansion": "^3.0.2",
-    "@eslint/eslintrc": {
-      "minimatch": "9.0.7"
-    },
-    "eslint-plugin-unicorn": {
-      "@eslint/eslintrc": {
-        "minimatch": "9.0.7"
-      }
-    }
+    "brace-expansion": "^3.0.2"
   }
 }
