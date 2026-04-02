@@ -24,6 +24,8 @@ jobs:
       contents: read
       issues: write
       security-events: write
+    env:
+      TRIVY_HIGH_ISSUE_THRESHOLD: '20'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -70,7 +72,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           HIGH="$(grep -c '"severity": "HIGH"' trivy-results.sarif || echo "0")"
-          if [ "$HIGH" -gt 0 ] && [ "$HIGH" -lt 20 ]; then
+          if [ "$HIGH" -gt 0 ] && [ "$HIGH" -lt "$TRIVY_HIGH_ISSUE_THRESHOLD" ]; then
             {
               echo "Trivy found **$HIGH HIGH** vulnerabilities in the Docker image."
               echo

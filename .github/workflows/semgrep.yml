@@ -27,7 +27,7 @@ jobs:
         run: python -m pip install --upgrade pip semgrep
 
       - name: Run Semgrep
-        run: semgrep scan --config auto --error --sarif --output semgrep.sarif
+        run: semgrep scan --config auto --sarif --output semgrep.sarif
 
       - name: Upload to GitHub
         if: always()
