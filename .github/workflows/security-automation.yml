@@ -133,15 +133,18 @@ jobs:
           git add package-lock.json package.json
           git commit -m "fix: auto-resolve npm audit findings"
           git push --set-upstream origin "$BRANCH"
+          cat > /tmp/security-autofix-pr.md <<'EOF'
+          ## Summary
+
+          - apply `npm audit fix` updates when high or critical vulnerabilities are detected
+          - verify lint, build, tests, and audit still pass before opening this PR
+          - keep dependency maintenance automated while leaving reviewable changes in a pull request
+          EOF
           gh pr create \
             --base development \
             --head "$BRANCH" \
             --title "fix: auto-resolve npm audit findings" \
-            --body "## Summary
-
-- apply \`npm audit fix\` updates when high or critical vulnerabilities are detected
-- verify lint, build, tests, and audit still pass before opening this PR
-- keep dependency maintenance automated while leaving reviewable changes in a pull request"
+            --body-file /tmp/security-autofix-pr.md
 
   auto-merge-dependabot:
     name: Auto-merge Dependabot
