@@ -15,6 +15,7 @@ updates:
     reviewers:
       - "AG064"
 
+  # Root Dockerfile used by release/publish workflows
   - package-ecosystem: "docker"
     directory: "/"
     target-branch: "development"
@@ -27,6 +28,7 @@ updates:
       prefix: "chore"
       include: "scope"
 
+  # Runtime image under /docker used by local and CI container builds
   - package-ecosystem: "docker"
     directory: "/docker"
     target-branch: "development"

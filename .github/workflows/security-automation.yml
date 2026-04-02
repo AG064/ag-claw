@@ -72,7 +72,7 @@ jobs:
     steps:
       - name: Fail for unresolved vulnerabilities
         run: |
-          echo "High or critical vulnerabilities detected by npm audit."
+          echo "High or critical vulnerabilities detected by npm audit: ${{ needs.validate.outputs.vulnerabilities }}"
           exit 1
 
   auto-fix:
@@ -115,10 +115,15 @@ jobs:
         env:
           CI: 'true'
         run: |
+          echo "Running TypeScript checks..."
           npm run typecheck
+          echo "Running ESLint..."
           npm run lint
+          echo "Building project..."
           npm run build
+          echo "Running test suite..."
           npm test
+          echo "Re-running npm audit..."
           npm audit --audit-level=high
 
       - name: Create pull request
