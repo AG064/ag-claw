@@ -1,7 +1,7 @@
 # ============================================
 # Stage 1: Build
 # ============================================
-FROM node:20-alpine AS builder
+FROM node:25-alpine AS builder
 
 WORKDIR /app
 
@@ -20,7 +20,7 @@ RUN npm prune --production --legacy-peer-deps
 # ============================================
 # Stage 2: Production
 # ============================================
-FROM node:20-alpine
+FROM node:25-alpine
 
 # Install wget for health checks (smaller than curl)
 RUN apk add --no-cache wget
