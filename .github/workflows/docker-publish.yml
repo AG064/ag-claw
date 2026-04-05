@@ -24,7 +24,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ag064/ag-claw
           tags: |
@@ -45,7 +45,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Update README DockerHub badge
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ag064/ag-claw
           flavor: latest=true
