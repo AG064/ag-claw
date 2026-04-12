@@ -28,7 +28,7 @@ jobs:
       TRIVY_HIGH_ISSUE_THRESHOLD: '20'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build Docker image
         run: docker build -t ag-claw:${{ github.sha }} -f docker/Dockerfile .

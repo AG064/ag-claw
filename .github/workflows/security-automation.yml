@@ -23,7 +23,7 @@ jobs:
       vulnerabilities: ${{ steps.audit.outputs.vulnerabilities }}
       has_vulnerabilities: ${{ steps.audit.outputs.has_vulnerabilities }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
@@ -84,7 +84,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v4
         with:
