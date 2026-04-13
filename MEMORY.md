@@ -36,10 +36,12 @@
 
 ### AG-Claw (github.com/AG064/ag-claw)
 - Modular AI agent framework, MIT license
-- v0.2.1 (2026-03-23): Budget, Org Chart, Self-Improving, Trajectory Export, Security Policy Engine, Credential Manager, Dashboard
+- v0.4.0 (2026-04-11): Privacy scrub (personal IDs removed from router/docs/comments); Model discovery in onboard (MiniMax, Groq, Ollama, NVIDIA, OpenRouter, Google, Anthropic, OpenAI)
 - TypeScript 0 errors, ESLint 0 errors, CI passing ✅
-- **Reverted:** embeddings (sqlite-vss broken), Docker publish (needs DOCKERHUB credentials)
-- **2026-04-06:** PR #29 (Merge development into main) closed without merge. 30 code-scanning alerts remain (github-copilot-3 model). LinkedIn DOM change broke company extraction, fixed.
+- **Source location:** `/home/agx/AGX/ag-claw/` (NOT `~/.openclaw/workspace/ag-claw/` which only has dist/)
+- **3 open code-scanning alerts** (not 30 — was a miscount; Apr 12 verification); typescript 6 and jest 30 migrations pending
+- tsconfig `moduleResolution=node10` deprecated (TS 6.7) — add `"ignoreDeprecations": "6.0"` to silence
+- **Outdated deps (Apr 12):** eslint-plugin-unicorn 50→64 (14 versions behind), jest 29→30 (breaking), express 4→5 (v5 stable), typescript 5.9→6 (upcoming)
 
 ### Job Search Agent (`agents/job-search/`)
 - **2026-03-28:** 3 applications with custom CVs + real GitHub links (Loan-Payment-Calculator, ag-claw, CodeMeet)
@@ -104,13 +106,19 @@
 - **HuggingFace:** (key in TOOLS.md)
 
 ## Nova Night Research (MemoAgent self-improvement)
-**Status 2026-04-10 4AM: Kimi k1.5 (RL scaling), MemGPT (OS-style paging), TinyLlama (1.1B SLM), Voyager (Minecraft lifelong learning)**
+**Status 2026-04-13 4AM: DreamPRM-Code (process reward model for coding), EMLoC (multi-modal long context), HuggingGPT (LLM as controller), Reflexion (verbal reinforcement)**
 
 ### Latest: 2026-04-10 4AM — RL Scaling, OS-Style Memory Paging, SLMs, Embodied Lifelong Learning
 - **Kimi k1.5** (arxiv:2501.12599, Moonshot AI, Jan 2025) — RL as new scaling axis for LLMs beyond pretraining data. Long2short: long-CoT activations improve short-CoT 550% on benchmarks. Partial rollouts reuse trajectory chunks for efficiency. Emergent self-improvement via scale (planning/reflection from RL).
 - **MemGPT** (arxiv:2310.08560, UC Berkeley, Oct 2023) — OS-style hierarchical memory tiers: fast (context window) / slow (external storage). LLM autonomously decides what to page in/out. Reflection: synthesizes context into higher-level summaries. Established virtual context management pattern for extended context.
 - **TinyLlama** (arxiv:2401.02385, Jan 2024) — 1.1B params, 1T pretraining tokens. FlashAttention + GroupedQueryAttention. Runs on consumer hardware. Shows massive pretraining compensates for small model size.
 - **Voyager** (arxiv:2305.16291, UC Berkeley/Salesforce, May 2023) — Lifelong learning agent in Minecraft. GPT-4-driven curriculum + ever-growing skill library (executable code) + self-verification loop. 3.3× more items, 15.3× faster tech tree vs prior art. Generalizes skills to new worlds.
+
+### Prior: 2026-04-13 4AM — DreamPRM-Code, EMLoC, HuggingGPT, Reflexion
+- **DreamPRM-Code** (arxiv:2512.15000, Dec 2025) — Chain-of-Function prompting treats functions as reasoning steps in code generation. Bi-level label correction via unit-test feedback. 80.9 pass@1 on LiveCodeBench, surpasses OpenAI o4-mini.
+- **HuggingGPT** (arxiv:2303.17580) — GPT-4 as controller for heterogeneous AI models (vision, language, audio). LLM plans, delegates to specialists, synthesizes results. Maps to OpenClaw foreman/subagent pattern.
+- **Reflexion** (arxiv:2303.17580 companion) — Verbal reinforcement learning. Agent reflects on failures in language, stores as episodic memory, revisits to improve. Self-improvement without gradient updates.
+- **EMLoC** (arxiv:2505.19812) — Training-free multi-modal long context compression via entropy-based token selection. Relevant for extending context beyond 128K without fine-tuning.
 
 ### Prior: 2026-04-08 4AM — Anticipatory Memory, IETF Audit Logging, RL-Optimized Memory Ops
 - **StreamAgent** (arxiv:2508.01875, ICLR 2026) — Anticipatory memory via event forecasting. Lightweight A(·) anticipatory agent + hierarchical streaming KV-cache for selective token recall.
@@ -165,10 +173,10 @@
 - **Playtech Estonia** Junior Java Developer — HIGH PRIORITY (Java exact match)
 - **Project Waterfall (Lionbridge):** TEST Apr 6, 2026 @ 23:00 Tallinn — ran, outcome unknown (no errors reported)
 - **Google billing past due:** accounts 01179C-7ACE9B-809853 / billing-ids 47537, 47538 — payment declined. Affects Gemini API, AI Studio.
-- **IIZI car insurance:** Ford Mondeo (684AYH) — 22.94€ unpaid, card payment failed, deadline 18.04.2026
+- **IIZI car insurance:** Ford Mondeo (684AYH) — 22.94€ unpaid, card payment failed, deadline 18.04.2026 (6 days remaining!)
 - **FILL Networks invoice:** received 2026-04-01 23:54 — needs review
 - Fiverr: message from bzhzhhs pending (no response yet)
-- Fiverr: new message from tina_80bz7q (2026-04-04) — needs response
+- Fiverr: message from tina_80bz7q (2026-04-04) — needs response
 - LinkedIn: Musab Nedim MUTLU connection request pending
 - LinkedIn: Ilija Matic — Recruiter connection request (2026-04-04, urgent/work)
 - **MemOS API Key:** NEED TO GET from memos.cloud — required for @memtensor/memos-cloud-openclaw-plugin in AG-Claw
