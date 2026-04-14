@@ -106,6 +106,8 @@
 - **HuggingFace:** (key in TOOLS.md)
 
 ## Nova Night Research (MemoAgent self-improvement)
+**Status 2026-04-14 4AM: SEARL (joint RL policy+tool graph memory), PsychAgent (experience-driven lifelong learning), Don't Overthink It (inter-rollout agreement as adaptive compute signal), YOCO (depth scaling / 100K+ context), ContextBudget (budget-aware context management), MSA (100M token sparse attention)**
+
 **Status 2026-04-13 4AM: DreamPRM-Code (process reward model for coding), EMLoC (multi-modal long context), HuggingGPT (LLM as controller), Reflexion (verbal reinforcement)**
 
 ### Latest: 2026-04-10 4AM — RL Scaling, OS-Style Memory Paging, SLMs, Embodied Lifelong Learning
