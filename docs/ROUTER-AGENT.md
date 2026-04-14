@@ -7,16 +7,16 @@ Router Agent — это центральный роутер, который пр
 ## Architecture
 
 ```
-User/Chat → Router → [AGX | Anneka | Home] → Response
+User/Chat → Router → [AGX | [REMOVED] | Home] → Response
 ```
 
 ### Routing Rules
 
 | Sender | Target Agent | Shared Context |
 |--------|-------------|----------------|
-| AG (Лёша) | AGX (main) | Home |
-| Аня | Anneka | Home |
-| Home Chat | Home Agent | AGX + Anneka |
+| AG ([USER1]) | AGX (main) | Home |
+| [REMOVED] | [REMOVED] | Home |
+| Home Chat | Home Agent | AGX + [REMOVED] |
 
 ## Router Logic (Pseudocode)
 
@@ -25,22 +25,22 @@ on_message(message):
     sender = message.sender_id
     chat = message.chat_id
     
-    if sender == ЛЁША_ID:
+    if sender == USER1_ID:
         → spawn AGX agent session
-    elif sender == АНЯ_ID:
-        → spawn Anneka agent session
+    elif sender == USER2_ID:
+        → spawn [REMOVED] agent session
     elif chat == HOME_CHAT_ID:
         → spawn Home agent session
     else:
         → AGX (default)
     
     # Agents can access shared Home context
-    # But Лёша and Аня contexts are isolated
+    # But [USER1] and [REMOVED] contexts are isolated
 ```
 
 ## Privacy Model
 
-- **Isolation**: AGX workspace и Anneka workspace — полностью изолированы
+- **Isolation**: AGX workspace и [REMOVED] workspace — полностью изолированы
 - **Shared**: Home workspace доступен обоим
 - **Router**: Не хранит память, только роутит
 
@@ -53,6 +53,6 @@ Create `src/agents/router/`:
 
 ## Use Cases
 
-1. **Family Bot** — AG + Аня + shared Home
+1. **Family Bot** — AG + [REMOVED] + shared Home
 2. **Customer Support** — multiple users, one bot per user
 3. **Team Bot** — shared team context + private user contexts
