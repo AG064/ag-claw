@@ -33,7 +33,7 @@ jobs:
       - name: Build macOS binary
         run: pkg dist/cli.js --targets node18-macos-x64 --output agclaw-macos
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             agclaw-linux-x64
