@@ -44,7 +44,7 @@ on_message(message):
 - **Shared**: Home workspace доступен обоим
 - **Router**: Не хранит память, только роутит
 
-## Implementation in AG-Claw
+## Implementation in Argentum
 
 Create `src/agents/router/`:
 - Simple session spawner
