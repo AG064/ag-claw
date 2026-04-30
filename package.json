@@ -92,7 +92,7 @@
     "sanitize-html": "^2.17.3",
     "ws": "^8.16.0",
     "yaml": "^2.3.4",
-    "zod": "^4.3.6"
+    "zod": "^4.4.1"
   },
   "devDependencies": {
     "@eslint/compat": "^2.0.4",
