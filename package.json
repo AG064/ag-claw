@@ -74,7 +74,7 @@
   "author": "AG064",
   "license": "MIT",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.91.1",
+    "@anthropic-ai/sdk": "^0.92.0",
     "@clack/prompts": "^1.2.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.8.0",
