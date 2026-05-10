@@ -1,7 +1,7 @@
 # ============================================
 # Stage 1: Build
 # ============================================
-FROM node:22-alpine AS builder
+FROM node:26-alpine AS builder
 
 WORKDIR /app
 
@@ -20,7 +20,7 @@ RUN npm prune --production --legacy-peer-deps
 # ============================================
 # Stage 2: Production
 # ============================================
-FROM node:22-alpine
+FROM node:26-alpine
 
 # Patch Alpine system CVEs (openssl, zlib, etc.)
 RUN apk --no-cache upgrade
